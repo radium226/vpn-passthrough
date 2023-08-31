@@ -1,0 +1,18 @@
+[project]
+name = "vpn-passthrough"
+version = "0.1.0"
+description = "VPN passthrough"
+authors = [
+    {name = "radium", email = "radium@rouages.xyz"},
+]
+dependencies = [
+    "pytest>=7.4.0",
+    "mypy>=1.5.1",
+]
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
