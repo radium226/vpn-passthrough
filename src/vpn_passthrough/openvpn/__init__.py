@@ -31,20 +31,28 @@ class OpenVPN:
 
         ip_command_part = ["ip", "netns", "exec", network_namespace.name] if (network_namespace := self.network_namespace) else []
 
-        openvpn_command = [
+        openvpn_command_part = [
             "openvpn",
                 "--cd", str(config_folder_path),
                 "--config", str(config_file_path),
                 "--dev", OpenVPN.TUNNEL_IFACE,
                 "--auth-user-pass", "pass.txt",
-                "--errors-to-stderr"
+                "--errors-to-stderr",
+                "--pull-filter", "ignore", "route-ipv6",
+                "--pull-filter", "ignore", "ifconfig-ipv6",
+                "--script-security", "2", \
+                "--setenv", "NEW_NAMESERVER", "10.0.0.242",
+                "--setenv", "OLD_NAMESERVER", "208.67.222.222",
+                "--up", str(Path(__file__).parent / "update-resolv-conf-up"),
+                "--down", str(Path(__file__).parent / "update-resolv-conf-down"),
+                
         ]
 
         command = sudo_command_part + ip_command_part + openvpn_command_part
 
         self._process = Popen(command)
 
-        sleep(5)
+        sleep(15)
 
     def stop(self) -> None:
         if (process := self._process):

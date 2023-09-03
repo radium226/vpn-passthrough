@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+set -euEo pipefail
+
+echo "${*}" >>"/tmp/args"
+
+echo "nameserver ${NEW_NAMESERVER}" >"/etc/resolv.conf"

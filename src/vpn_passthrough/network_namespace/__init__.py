@@ -54,10 +54,12 @@ class NetworkNamespace:
         return self
 
     def __exit__(self, type, value, traceback):
+        run(["sudo", "ip", "link", "del", NetworkNamespace.VETH_IFACE], check=True)
         run(["sudo", "ip", "netns", "del", self.name], check=True)
 
 
 def write_file(content: str, file_path: Path):
+    run(["sudo", "mkdir", "-p", str(file_path.parent)], check=True)
     tee_process = Popen(["sudo", "tee", str(file_path)], stdin=PIPE, stdout=DEVNULL, text=True)
     tee_process.stdin.write(content)
     tee_process.stdin.close()

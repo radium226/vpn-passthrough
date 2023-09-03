@@ -9,10 +9,9 @@ def find_ip(*, strategy: Strategy = Strategy.HTTP, network_namespace: NetworkNam
     match strategy:
         case Strategy.HTTP:
             ip_command_part = ["sudo", "ip", "netns", "exec", network_namespace.name] if network_namespace else []
-            curl_command_part = ["curl", "-s", "https://api.ipify.org?format=text"]
+            curl_command_part = ["curl", "https://api.ipify.org?format=text"]
             command = ip_command_part + curl_command_part
-
-            return run(command, capture_output=True, check=True, text=True).stdout.strip()
-
+            print(" ".join(command))
+            return run(command, capture_output=True, text=True).stdout.strip()
         case Strategy.TORRENT:
             raise Exception("Not yet implemented! ")
