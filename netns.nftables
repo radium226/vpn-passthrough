@@ -1,0 +1,24 @@
+#!/usr/sbin/nft -f
+
+table test_netns {
+    chain prerouting {
+    }
+                 
+    chain postrouting {
+        ip saddr 10.200.1.0/24 masquerade
+    }
+}
+
+
+# nft add table ip "test_netns"
+
+# nft add chain "nat" table "test_netns" [ {} ]
+
+# nft add rule ip nat POSTROUTING ip saddr 10.200.1.0/24 counter masquerade
+
+
+
+#             # nft add rule ip nat POSTROUTING ip saddr 10.200.1.0/24 counter masquerade
+#             # nft add rule ip filter FORWARD oifname "veth1" counter accept
+#             # nft add rule ip filter FORWARD iifname "veth1" counter accept
+        

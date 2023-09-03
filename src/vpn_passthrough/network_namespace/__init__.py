@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from typing import ClassVar
-from subprocess import run
+from subprocess import run, Popen, PIPE, DEVNULL
+from textwrap import dedent
+from pathlib import Path
+from enum import Enum, auto
 
 
 @dataclass
@@ -18,6 +21,15 @@ class NetworkNamespace:
         run(["sudo", "ip", "netns", "exec", self.name] + command, **kwargs)
 
     def __enter__(self) -> "NetworkNamespace":
+
+        write_file(
+            dedent("""\
+            nameserver 208.67.222.222
+            nameserver 208.67.220.220
+            """),
+            Path("/etc/netns") / self.name / "resolv.conf"
+        )
+
         # Create the namespace
         run(["sudo", "ip", "netns", "add", self.name], check=True)
         
@@ -35,11 +47,21 @@ class NetworkNamespace:
         # Setup loopback within namespace
         self.exec(["ip", "link", "set", "lo", "up"], check=True)
         self.exec(["ip", "route", "add", "default", "via", NetworkNamespace.VETH_ADDR], check=True)
+
+        nftables_conf_file_path = Path(__file__).parent / "nftables.conf"
+        run(["sudo", "nft", "--file", str(nftables_conf_file_path), "--define", f"veth_iface={NetworkNamespace.VETH_IFACE}"], check=True)
         
         return self
 
     def __exit__(self, type, value, traceback):
         run(["sudo", "ip", "netns", "del", self.name], check=True)
+
+
+def write_file(content: str, file_path: Path):
+    tee_process = Popen(["sudo", "tee", str(file_path)], stdin=PIPE, stdout=DEVNULL, text=True)
+    tee_process.stdin.write(content)
+    tee_process.stdin.close()
+    tee_process.wait()
 
 
 def list_network_namespaces() -> list[NetworkNamespace]:

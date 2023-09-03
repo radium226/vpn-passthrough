@@ -2,6 +2,7 @@ from typing import ClassVar
 from pathlib import Path
 from dataclasses import dataclass
 from subprocess import Popen, run
+from time import sleep
 
 from ..network_namespace import NetworkNamespace
 
@@ -23,7 +24,8 @@ class OpenVPN:
         self.start()
 
     def start(self) -> None:
-        config_file_path = (self.config_folder_path or OpenVPN.CONFIG_FOLDER_PATH) / f"{self.country}.conf"
+        config_folder_path = self.config_folder_path or OpenVPN.CONFIG_FOLDER_PATH
+        config_file_path = Path(f"{self.country}.ovpn")
 
         sudo_command_part = ["sudo"]
 
@@ -31,15 +33,18 @@ class OpenVPN:
 
         openvpn_command = [
             "openvpn",
-                "--cd", str(OpenVPN.CONFIG_FOLDER_PATH),
+                "--cd", str(config_folder_path),
                 "--config", str(config_file_path),
                 "--dev", OpenVPN.TUNNEL_IFACE,
+                "--auth-user-pass", "pass.txt",
                 "--errors-to-stderr"
         ]
 
         command = sudo_command_part + ip_command_part + openvpn_command_part
 
         self._process = Popen(command)
+
+        sleep(5)
 
     def stop(self) -> None:
         if (process := self._process):
