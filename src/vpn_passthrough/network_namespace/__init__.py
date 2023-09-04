@@ -1,15 +1,18 @@
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, NewType
 from subprocess import run, Popen, PIPE, DEVNULL
 from textwrap import dedent
 from pathlib import Path
 from enum import Enum, auto
 
 
+NetworkNamespaceName = NewType("NetworkNamespaceName", str)
+
+
 @dataclass
 class NetworkNamespace:
 
-    name: str
+    name: NetworkNamespaceName
 
     VPEER_IFACE: ClassVar[str] = "vpeer1"
     VPEER_ADDR: ClassVar[str] = "10.200.1.1"

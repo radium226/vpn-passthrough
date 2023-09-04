@@ -9,6 +9,8 @@ dependencies = [
     "pytest>=7.4.0",
     "mypy>=1.5.1",
     "requests>=2.31.0",
+    "click>=8.1.7",
+    "click-default-group>=1.2.4",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
@@ -17,3 +19,6 @@ license = {text = "MIT"}
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
+
+[project.scripts]
+vpn-passthrough = "vpn_passthrough.app:app"

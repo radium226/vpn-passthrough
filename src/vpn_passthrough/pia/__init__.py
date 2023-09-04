@@ -6,6 +6,7 @@ import requests
 import json
 from enum import StrEnum, auto
 from ..network_namespace import NetworkNamespace
+from ..commons import Credentials, RegionName
 from subprocess import run
 from pathlib import Path
 from base64 import b64decode
@@ -34,8 +35,8 @@ class Region():
     id: str
     name: str
     dns_host: str
-    servers: dict[ServerType, list[Server]] = field(default_factory=dict)
-    supports_port_forward: bool = False
+    servers_by_type: dict[ServerType, list[Server]] = field(default_factory=dict)
+    supports_port_forwarding: bool = False
 
 
 @dataclass
@@ -43,13 +44,6 @@ class PayloadAndSignature():
     
     payload: str
     signature: str
-
-
-@dataclass
-class Credentials():
-
-    username: str
-    password: str
 
 
 @dataclass
@@ -62,8 +56,14 @@ class PIA():
     GENERATE_TOKEN_URL: ClassVar[str] = "https://privateinternetaccess.com/gtoken/generateToken"
     SERVERS_URL: ClassVar[str] = "https://serverlist.piaservers.net/vpninfo/servers/v6"
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        pass
+
     def generate_token(self) -> str:
-        auth = HTTPBasicAuth(self.credentials.username, self.credentials.password)
+        auth = HTTPBasicAuth(self.credentials.login, self.credentials.password)
         response = requests.get(PIA.GENERATE_TOKEN_URL, auth=auth)
         response.raise_for_status()
         json = response.json()
@@ -75,14 +75,14 @@ class PIA():
         return Region(
             id=obj["id"],
             name=obj["name"],
-            servers={ 
+            servers_by_type={ 
                 ServerType(type_obj): [
                     cls._parse_server(server_obj)
                     for server_obj in server_objs
                 ] 
                 for type_obj, server_objs in obj["servers"].items()
             },
-            supports_port_forward=obj["port_forward"],
+            supports_port_forwarding=obj["port_forward"],
             dns_host=obj["dns"]
         )
 
@@ -94,7 +94,7 @@ class PIA():
         )
 
     @classmethod
-    def list_regions(cls) -> list[Server]:
+    def list_regions(cls) -> list[Region]:
         response = requests.get(cls.SERVERS_URL, headers={"Accept": "application/json"})
         [text, *_] = response.text.splitlines()
         obj = json.loads(text)
@@ -139,6 +139,9 @@ class PIA():
         port = int(obj["port"])
         return port
 
-        
-
+    @property
+    def regions_by_name(self) -> dict[RegionName, Region]:
+        return {
+            region.name: region for region in self.list_regions()
+        }
     
