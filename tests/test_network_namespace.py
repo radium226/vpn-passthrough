@@ -10,6 +10,8 @@ def test_network_namespace():
         network_namespace.exec(["ping", "-c", "1", "-W", "1", "www.google.fr"], check=True)
         ip_inside = find_ip(network_namespace=network_namespace)
         assert ip_inside == ip_outside
+        # from time import sleep
+        # sleep(5 * 60)
 
     assert len(list_network_namespaces()) == number_of_network_namespaces
 

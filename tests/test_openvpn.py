@@ -16,8 +16,6 @@ def test_openvpn(network_namespace: NetworkNamespace):
     with OpenVPN(network_namespace=network_namespace):
         private_ip = find_ip(network_namespace=network_namespace)
         assert private_ip != public_ip_1
-        from time import sleep
-        sleep(60 * 5)
 
     public_ip_2 = find_ip(network_namespace=network_namespace)
     assert public_ip_1 == public_ip_2

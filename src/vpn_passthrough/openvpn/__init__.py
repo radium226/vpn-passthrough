@@ -20,10 +20,16 @@ class OpenVPN:
 
     _process: Popen | None = None
 
+    @property
+    def gateway(self) -> str:
+        with Path("/tmp/gateway").open("r") as stream:
+            return stream.read().strip()
+
     def __enter__(self):
         self.start()
+        return self
 
-    def start(self) -> None:
+    def start(self) -> str:
         config_folder_path = self.config_folder_path or OpenVPN.CONFIG_FOLDER_PATH
         config_file_path = Path(f"{self.country}.ovpn")
 
