@@ -42,7 +42,7 @@ def pass_through(
                 raise Exception("Unable to find region! ")
 
             with pia.openvpn(region=region, network_namespace=network_namespace) as openvpn:
-                port = pia.bind_port_to_forward()
+                port = pia.bind_port_to_forward(region=region)
 
     
     

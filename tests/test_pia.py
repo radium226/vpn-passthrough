@@ -3,6 +3,8 @@ from os import environ
 from vpn_passthrough.pia import PIA, Credentials
 from vpn_passthrough.openvpn import OpenVPN
 from vpn_passthrough.network_namespace import NetworkNamespace
+from vpn_passthrough.check_connectivity import check_connectivity
+from vpn_passthrough.find_ip import find_ip
 
 
 def require_pia_credentials():
@@ -17,7 +19,7 @@ def require_pia_credentials():
 @fixture
 def pia_credentials() -> Credentials:
     return Credentials(
-        username=environ["PIA_USER"],
+        user=environ["PIA_USER"],
         password=environ["PIA_PASS"],
     )
 
@@ -50,30 +52,35 @@ def test_generate_token(pia: PIA):
 @require_pia_credentials()
 def test_generate_payload_and_signature(pia_credentials: Credentials, openvpn: OpenVPN):
     with NetworkNamespace(name="test_openvpn-test_port_forward") as network_namespace:
-        with OpenVPN(network_namespace=network_namespace) as openvpn:
+        with OpenVPN(network_namespace=network_namespace) as tunnel:
             pia = PIA(credentials=pia_credentials, network_namespace=network_namespace)
-            gateway = openvpn.gateway
+            gateway = tunnel.gateway
             payload_and_signature = pia.generate_payload_and_signature(
                 gateway=gateway, 
                 hostname="belgrade402",
             )
 
 @require_pia_credentials()
-def test_forward_port(pia_credentials: Credentials, openvpn: OpenVPN):
+def test_forward_port(pia_credentials: Credentials):
     with NetworkNamespace(name="test_openvpn-test_port_forward") as network_namespace:
-        with OpenVPN(network_namespace=network_namespace) as openvpn:
+        with OpenVPN(network_namespace=network_namespace) as tunnel:
             pia = PIA(credentials=pia_credentials, network_namespace=network_namespace)
-            gateway = openvpn.gateway
+            gateway = tunnel.gateway
             port = pia.forward_port(
                 gateway=gateway, 
                 hostname="belgrade402",
             )
             assert port > 0
 
-            check_connectivity(
-                
-            )
+            ip_address = find_ip(network_namespace=network_namespace)
 
+            check_connectivity(
+                local_port=port,
+                remote_port=port,
+                local_address="0.0.0.0",
+                remote_address=ip_address,
+                network_namespace=network_namespace,
+            )
 
 
 

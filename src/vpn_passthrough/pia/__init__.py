@@ -63,7 +63,7 @@ class PIA():
         pass
 
     def generate_token(self) -> str:
-        auth = HTTPBasicAuth(self.credentials.login, self.credentials.password)
+        auth = HTTPBasicAuth(self.credentials.user, self.credentials.password)
         response = requests.get(PIA.GENERATE_TOKEN_URL, auth=auth)
         response.raise_for_status()
         json = response.json()
@@ -135,9 +135,27 @@ class PIA():
     def forward_port(self, *, hostname: str, gateway: str) -> int:
         payload_and_signature = self.generate_payload_and_signature(hostname=hostname, gateway=gateway)
         payload = payload_and_signature.payload
+        signature = payload_and_signature.signature
         obj = json.loads(b64decode(payload).decode("utf-8"))
         port = int(obj["port"])
+        self.bind_port(hostname=hostname, gateway=gateway, payload=payload, signature=signature)
         return port
+
+    def bind_port(self, *, hostname: str, gateway: str, payload: str, signature: str):
+        command = [
+                "sudo",
+                "ip", "netns", "exec", self.network_namespace.name,
+                "curl", "-G", "-s", "-m", "5",
+                "--connect-to", f"{hostname}::{gateway}:",
+                "--cacert", str(Path(__file__).parent / "ca.rsa.4096.crt"),
+                "--data-urlencode", f"payload={payload}",
+                "--data-urlencode", f"signature={signature}",
+                f"https://{hostname}:19999/bindPort",
+            ]
+        stdout = run(command, capture_output=True, text=True, check=True).stdout
+        obj = json.loads(stdout)
+        status = obj["status"]
+        print(f"status={status}")
 
     @property
     def regions_by_name(self) -> dict[RegionName, Region]:

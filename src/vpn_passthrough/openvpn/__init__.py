@@ -8,6 +8,12 @@ from ..network_namespace import NetworkNamespace
 
 
 @dataclass
+class Tunnel():
+
+    gateway: str
+
+
+@dataclass
 class OpenVPN:
 
     country: str = "serbia"
@@ -20,16 +26,13 @@ class OpenVPN:
 
     _process: Popen | None = None
 
-    @property
-    def gateway(self) -> str:
-        with Path("/tmp/gateway").open("r") as stream:
-            return stream.read().strip()
+
 
     def __enter__(self):
-        self.start()
-        return self
+        tunnel = self.open_tunnel()
+        return tunnel
 
-    def start(self) -> str:
+    def open_tunnel(self) -> Tunnel:
         config_folder_path = self.config_folder_path or OpenVPN.CONFIG_FOLDER_PATH
         config_file_path = Path(f"{self.country}.ovpn")
 
@@ -60,14 +63,21 @@ class OpenVPN:
 
         sleep(15)
 
-    def stop(self) -> None:
+        with Path("/tmp/gateway").open("r") as stream:
+            gateway = stream.read().strip()
+
+        return Tunnel(
+            gateway=gateway,
+        )
+
+    def close_tunnel(self) -> None:
         if (process := self._process):
             run(["kill", "-s", "TERM", str(process.pid)])
         else:
             raise Exception("OpenVPN is not started! ")
 
     def __exit__(self, type, value, traceback):
-        self.stop()
+        self.close_tunnel()
 
     def wait(self):
         if (process := self._process):
