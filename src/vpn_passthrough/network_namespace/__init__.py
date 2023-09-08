@@ -1,12 +1,20 @@
 from dataclasses import dataclass
-from typing import ClassVar, NewType
+from typing import ClassVar, NewType, Protocol, Any
 from subprocess import run, Popen, PIPE, DEVNULL
 from textwrap import dedent
 from pathlib import Path
 from enum import Enum, auto
+from io import BytesIO
+import dill
 
 
 NetworkNamespaceName = NewType("NetworkNamespaceName", str)
+
+
+class Func(Protocol):
+
+    def __call__(**kwargs: dict[str, Any]) -> Any:
+        pass
 
 
 @dataclass
@@ -20,8 +28,33 @@ class NetworkNamespace:
     VETH_IFACE: ClassVar[str] = "veth1"
     VETH_ADDR: ClassVar[str] = "10.200.1.2"
 
+    @staticmethod
+    def current() -> "NetworkNamespace":
+        command = ["sudo", "ip", "netns", "id"]
+        name = run(command, text=True, capture_output=True, check=True).stdout.strip()
+        return NetworkNamespace(name=name)
+    
+
     def exec(self, command: list[str], **kwargs):
         run(["sudo", "ip", "netns", "exec", self.name] + command, **kwargs)
+
+    def attach(self, func: Func) -> Func:
+        def closure(*args, **kwargs):
+            input_payload = {
+                "func": func,
+                "args": args,
+                "kwargs": kwargs,
+            }
+            input_bytes = dill.dumps(input_payload)
+
+            ip_command_part = ["sudo", "ip", "netns", "exec", str(self.name)]
+            python_command_part = ["python", "-m", "vpn_passthrough.network_namespace"]
+            command = ip_command_part + python_command_part
+            output_bytes = run(command, input=input_bytes, check=True, capture_output=True).stdout
+            output_payload = dill.loads(output_bytes)
+            return output_payload
+
+        return closure
 
     def __enter__(self) -> "NetworkNamespace":
 
