@@ -64,13 +64,14 @@ class NetworkNamespace:
 def write_file(content: str, file_path: Path):
     run(["sudo", "mkdir", "-p", str(file_path.parent)], check=True)
     tee_process = Popen(["sudo", "tee", str(file_path)], stdin=PIPE, stdout=DEVNULL, text=True)
-    tee_process.stdin.write(content)
-    tee_process.stdin.close()
+    if stdin := tee_process.stdin:
+        stdin.write(content)
+        stdin.close()
     tee_process.wait()
 
 
 def list_network_namespaces() -> list[NetworkNamespace]:
     return [
-        NetworkNamespace(name)
+        NetworkNamespace(NetworkNamespaceName(name))
         for name in run(["sudo", "ip", "netns", "show"], capture_output=True, text=True, check=True).stdout.splitlines()
     ]

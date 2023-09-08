@@ -2,11 +2,11 @@
 # It is not intended for manual editing.
 
 [metadata]
-groups = ["default"]
+groups = ["default", "dev"]
 cross_platform = true
 static_urls = false
 lock_version = "4.3"
-content_hash = "sha256:d90dd43c84e2cfd924e7e87f1200aa7d61b4a675e1404447418eacc9741e3e9d"
+content_hash = "sha256:f20443c78cb2565fab165ece5aee55bdf27cb13365903fba475703a17d533311"
 
 [[package]]
 name = "certifi"
@@ -183,6 +183,39 @@ dependencies = [
 files = [
     {file = "requests-2.31.0-py3-none-any.whl", hash = "sha256:58cd2187c01e70e6e26505bca751777aa9f2ee0b7f4300988b709f44e013003f"},
     {file = "requests-2.31.0.tar.gz", hash = "sha256:942c5a758f98d790eaed1a29cb6eefc7ffb0d1cf7af05c3d2791656dbd6ad1e1"},
+]
+
+[[package]]
+name = "types-click-default-group"
+version = "1.2.0.0"
+summary = "Typing stubs for click-default-group"
+dependencies = [
+    "click>=8.0.0",
+]
+files = [
+    {file = "types-click-default-group-1.2.0.0.tar.gz", hash = "sha256:672a198ab8e13c302c8bdd15908a3bb829a9c91b0cc2be734a86b9f753502e20"},
+    {file = "types_click_default_group-1.2.0.0-py3-none-any.whl", hash = "sha256:5b13233b552a80859214bac34c6d95c5bc25f8735618f873be892939541c6a93"},
+]
+
+[[package]]
+name = "types-requests"
+version = "2.31.0.2"
+summary = "Typing stubs for requests"
+dependencies = [
+    "types-urllib3",
+]
+files = [
+    {file = "types-requests-2.31.0.2.tar.gz", hash = "sha256:6aa3f7faf0ea52d728bb18c0a0d1522d9bfd8c72d26ff6f61bfc3d06a411cf40"},
+    {file = "types_requests-2.31.0.2-py3-none-any.whl", hash = "sha256:56d181c85b5925cbc59f4489a57e72a8b2166f18273fd8ba7b6fe0c0b986f12a"},
+]
+
+[[package]]
+name = "types-urllib3"
+version = "1.26.25.14"
+summary = "Typing stubs for urllib3"
+files = [
+    {file = "types-urllib3-1.26.25.14.tar.gz", hash = "sha256:229b7f577c951b8c1b92c1bc2b2fdb0b49847bd2af6d1cc2a2e3dd340f3bda8f"},
+    {file = "types_urllib3-1.26.25.14-py3-none-any.whl", hash = "sha256:9683bbb7fb72e32bfe9d2be6e04875fbe1b3eeec3cbb4ea231435aa7fd6b4f0e"},
 ]
 
 [[package]]

@@ -33,7 +33,7 @@ class Server():
 class Region():
 
     id: str
-    name: str
+    name: RegionName
     dns_host: str
     servers_by_type: dict[ServerType, list[Server]] = field(default_factory=dict)
     supports_port_forwarding: bool = False
@@ -142,9 +142,10 @@ class PIA():
         return port
 
     def bind_port(self, *, hostname: str, gateway: str, payload: str, signature: str):
-        command = [
+        sudo_command_part = ["sudo"]
+        ip_command_part = ["ip", "netns", "exec", network_namespace.name] if (network_namespace := self.network_namespace) else []
+        curl_command_part = [
                 "sudo",
-                "ip", "netns", "exec", self.network_namespace.name,
                 "curl", "-G", "-s", "-m", "5",
                 "--connect-to", f"{hostname}::{gateway}:",
                 "--cacert", str(Path(__file__).parent / "ca.rsa.4096.crt"),
@@ -152,6 +153,7 @@ class PIA():
                 "--data-urlencode", f"signature={signature}",
                 f"https://{hostname}:19999/bindPort",
             ]
+        command = sudo_command_part + ip_command_part + curl_command_part
         stdout = run(command, capture_output=True, text=True, check=True).stdout
         obj = json.loads(stdout)
         status = obj["status"]
