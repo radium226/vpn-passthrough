@@ -39,7 +39,7 @@ class NetworkNamespace:
     def current() -> "NetworkNamespace":
         command = ["sudo", "ip", "netns", "id"]
         name = run(command, text=True, capture_output=True, check=True).stdout.strip()
-        return NetworkNamespace(name=name)
+        return NetworkNamespace(name=NetworkNamespaceName(name))
     
 
     def exec(self, command: list[str], **kwargs):

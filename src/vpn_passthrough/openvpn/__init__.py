@@ -5,7 +5,7 @@ from subprocess import Popen, run
 from time import sleep
 
 from ..network_namespace import NetworkNamespace
-
+from .script import ScriptServer
 
 @dataclass
 class Tunnel():
@@ -36,9 +36,14 @@ class OpenVPN:
         config_folder_path = self.config_folder_path or OpenVPN.CONFIG_FOLDER_PATH
         config_file_path = Path(f"{self.country}.ovpn")
 
-        sudo_command_part = ["sudo"]
+        sudo_command_part = ["sudo", "-E"]
 
         ip_command_part = ["ip", "netns", "exec", network_namespace.name] if (network_namespace := self.network_namespace) else []
+
+
+        script_socket_path = Path("/tmp/vpn-passthrough-openvpn-script.sock")
+        script_server = ScriptServer(socket_path=script_socket_path)
+        script_server.start()
 
         openvpn_command_part = [
             "openvpn",
@@ -52,19 +57,16 @@ class OpenVPN:
                 "--script-security", "2", \
                 "--setenv", "NEW_NAMESERVER", "10.0.0.242",
                 "--setenv", "OLD_NAMESERVER", "208.67.222.222",
-                "--up", str(Path(__file__).parent / "update-resolv-conf-up"),
-                "--down", str(Path(__file__).parent / "update-resolv-conf-down"),
-                
+                "--setenv", "script_socket_path", "208.67.222.222",
+                "--up", "vpn-passthrough-openvpn-script",
+                "--down", "vpn-passthrough-openvpn-script",
         ]
 
         command = sudo_command_part + ip_command_part + openvpn_command_part
-
         self._process = Popen(command)
 
-        sleep(15)
-
-        with Path("/tmp/gateway").open("r") as stream:
-            gateway = stream.read().strip()
+        up_info = script_server.wait_for_up()
+        gateway = up_info["route_vpn_gateway"]
 
         return Tunnel(
             gateway=gateway,
