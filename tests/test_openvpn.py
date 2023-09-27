@@ -8,6 +8,8 @@ from vpn_passthrough.openvpn import OpenVPN
 from vpn_passthrough.find_ip import find_ip
 from vpn_passthrough.openvpn.script.script import ScriptServer
 
+from time import sleep
+
 
 @fixture
 def network_namespace():
@@ -20,7 +22,6 @@ def test_openvpn(network_namespace: NetworkNamespace):
     with OpenVPN(network_namespace=network_namespace):
         private_ip = find_ip(network_namespace=network_namespace)
         assert private_ip != public_ip_1
-
     public_ip_2 = find_ip(network_namespace=network_namespace)
     assert public_ip_1 == public_ip_2
     
@@ -54,6 +55,7 @@ def test_script():
             "untrusted_port": "1198",
             "verb": "1",
             "NEW_NAMESERVER": "1.2.3.4",
+            "OLD_NAMESERVER": "1.2.3.4",
         }, check=True)
 
         script_server.wait_for_debug()

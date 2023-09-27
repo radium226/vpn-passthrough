@@ -12,12 +12,15 @@ class ScriptType(StrEnum):
 
     DEBUG = auto()
 
+    DOWN = auto()
+
 
 @bind_args_from_env()
 def app(
     script_type: ScriptType,
     route_vpn_gateway: str,
     NEW_NAMESERVER: str,
+    OLD_NAMESERVER: str,
 ):
     client = ScriptClient()
 
@@ -28,8 +31,13 @@ def app(
             client.debug()
     
         case ScriptType.UP:
+            with Path("/etc/resolv.conf").open("w") as stream:
+                stream.write(f"nameserver {NEW_NAMESERVER}")
             client.up(info={
                 "route_vpn_gateway": route_vpn_gateway,
             })
+
+        case ScriptType.DOWN:
             with Path("/etc/resolv.conf").open("w") as stream:
-                stream.write(f"nameserver {NEW_NAMESERVER}")
+                stream.write(f"nameserver {OLD_NAMESERVER}")
+            # client.down()

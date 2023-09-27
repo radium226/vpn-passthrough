@@ -3,6 +3,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from subprocess import Popen, run
 from time import sleep
+from os import environ
+from shutil import which
 
 from ..network_namespace import NetworkNamespace
 from .script import ScriptServer
@@ -25,6 +27,7 @@ class OpenVPN:
     TUNNEL_IFACE: ClassVar[str] = "tun0"
 
     _process: Popen | None = None
+    _script_server: ScriptServer | None = None
 
 
 
@@ -44,6 +47,7 @@ class OpenVPN:
         script_socket_path = Path("/tmp/vpn-passthrough-openvpn-script.sock")
         script_server = ScriptServer(socket_path=script_socket_path)
         script_server.start()
+        self._script_server = script_server
 
         openvpn_command_part = [
             "openvpn",
@@ -58,12 +62,17 @@ class OpenVPN:
                 "--setenv", "NEW_NAMESERVER", "10.0.0.242",
                 "--setenv", "OLD_NAMESERVER", "208.67.222.222",
                 "--setenv", "script_socket_path", "208.67.222.222",
-                "--up", "vpn-passthrough-openvpn-script",
-                "--down", "vpn-passthrough-openvpn-script",
+                "--setenv", "PATH", environ["PATH"],
+                "--up", which("vpn-passthrough-openvpn-script"),
+                "--setenv", "NEW_NAMESERVER", "10.0.0.242",
+                "--setenv", "OLD_NAMESERVER", "208.67.222.222",
+                "--setenv", "script_socket_path", "208.67.222.222",
+                "--setenv", "PATH", environ["PATH"],
+                "--down", which("vpn-passthrough-openvpn-script"),
         ]
 
         command = sudo_command_part + ip_command_part + openvpn_command_part
-        self._process = Popen(command)
+        self._process = Popen(command, env=environ | {"PATH": environ["PATH"]})
 
         up_info = script_server.wait_for_up()
         gateway = up_info["route_vpn_gateway"]
@@ -73,8 +82,10 @@ class OpenVPN:
         )
 
     def close_tunnel(self) -> None:
-        if (process := self._process):
+        if (process := self._process, script_server := self._script_server):
             run(["kill", "-s", "TERM", str(process.pid)])
+            self.wait()
+            script_server.stop()
         else:
             raise Exception("OpenVPN is not started! ")
 
