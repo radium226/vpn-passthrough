@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from types import EllipsisType
 from typing import ClassVar, Any, Generator
 from dataclasses import dataclass, field
 from requests.auth import HTTPBasicAuth
@@ -62,7 +63,7 @@ class PIA():
 
     network_namespace: NetworkNamespace | None = None
 
-    DEFAULT_REGION_NAME: ClassVar[str] = RegionName("Serbia")
+    DEFAULT_REGION_NAME: ClassVar[RegionName] = RegionName("Serbia")
 
     GENERATE_TOKEN_URL: ClassVar[str] = "https://privateinternetaccess.com/gtoken/generateToken"
 
@@ -72,7 +73,7 @@ class PIA():
 
 
     @contextmanager
-    def through_tunnel(self, *, region_name: RegionName = ...,  forward_port: bool = False) -> Generator[Tunnel, None, None]:
+    def through_tunnel(self, *, region_name: RegionName | EllipsisType = ...,  forward_port: bool = False) -> Generator[Tunnel, None, None]:
         if region_name is ...:
             region_name = self.DEFAULT_REGION_NAME
 
@@ -203,19 +204,9 @@ class PIA():
         return {
             region.name: region for region in self.list_regions()
         }
-    
-    def generate_openvpn_config(self, *, region_name: RegionName) -> Path:
-        if (region := next(self.regions_by_name[region_name], None)):
-            server = next(region.servers_by_type[ServerType.OPENVPN_UDP])
-            
-            with Path("/tmp/config.ovpn").open("w") as f:
-                with Path(__file__).parent / "config.ovpn" as t:
-                    f.write(t.read())
-                f.write()
-
         
     
-    def _convert_cert_to_pem(self, crt_file_path: Path) -> Path:
-        run(["openssl", "x509", "-in", f"{crt_file_path}", "-out", "mycert.pem", "-outform", "PEM"])
+    # def _convert_cert_to_pem(self, crt_file_path: Path) -> Path:
+    #     return Path(run(["openssl", "x509", "-in", f"{crt_file_path}", "-out", "mycert.pem", "-outform", "PEM"]).stdout)
 
     

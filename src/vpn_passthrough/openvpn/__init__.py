@@ -63,6 +63,9 @@ class OpenVPN:
             with auth_pass_file_path.open("w") as f:
                 f.write(f"{self.credentials.user}\n{self.credentials.password}\n")
 
+        
+        if not (script_path := which("vpn-passthrough-openvpn-script")):
+            raise Exception("Unable to find the script! ")
 
         openvpn_command_part = (
             [
@@ -77,12 +80,12 @@ class OpenVPN:
                     "--setenv", "OLD_NAMESERVER", "208.67.222.222",
                     "--setenv", "script_socket_path", "208.67.222.222",
                     "--setenv", "PATH", environ["PATH"],
-                    "--up", which("vpn-passthrough-openvpn-script"),
+                    "--up", script_path,
                     "--setenv", "NEW_NAMESERVER", "10.0.0.242",
                     "--setenv", "OLD_NAMESERVER", "208.67.222.222",
                     "--setenv", "script_socket_path", "208.67.222.222",
                     "--setenv", "PATH", environ["PATH"],
-                    "--down", which("vpn-passthrough-openvpn-script"),
+                    "--down", script_path,
             ] + 
             # (["--ca", str(ca_pem_file_path)] if (ca_pem_file_path := self.ca_pem_file_path) else []) + 
             (["--remote", str(remote)] if (remote := self.remote) else []) +
@@ -103,7 +106,7 @@ class OpenVPN:
         )
 
     def close_tunnel(self) -> None:
-        if (process := self._process, script_server := self._script_server):
+        if (process := self._process) and (script_server := self._script_server):
             run(["kill", "-s", "TERM", str(process.pid)])
             self.wait()
             script_server.stop()

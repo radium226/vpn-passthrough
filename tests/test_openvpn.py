@@ -1,3 +1,4 @@
+from pathlib import Path
 from pytest import fixture, mark
 
 from subprocess import run
@@ -7,6 +8,7 @@ from vpn_passthrough.network_namespace import NetworkNamespace
 from vpn_passthrough.openvpn import OpenVPN
 from vpn_passthrough.find_ip import find_ip
 from vpn_passthrough.openvpn.script.script import ScriptServer
+from vpn_passthrough.commons import Credentials
 
 from time import sleep
 
@@ -17,9 +19,16 @@ def network_namespace():
         yield network_namespace
 
 
-def test_openvpn(network_namespace: NetworkNamespace):
+@mark.requires_pia_credentials()
+def test_openvpn(pia_credentials: Credentials, network_namespace: NetworkNamespace):
     public_ip_1 = find_ip(network_namespace=network_namespace)
-    with OpenVPN(network_namespace=network_namespace):
+    with OpenVPN(
+        network_namespace=network_namespace,
+        config_file_path=Path(__file__).parent / "serbia.ovpn",
+        remote="rs.privacy.network",
+        port=1198,
+        credentials=pia_credentials,
+    ):
         private_ip = find_ip(network_namespace=network_namespace)
         assert private_ip != public_ip_1
     public_ip_2 = find_ip(network_namespace=network_namespace)

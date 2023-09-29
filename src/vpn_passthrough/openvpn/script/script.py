@@ -53,7 +53,7 @@ class ScriptServer():
 
     up_route: UpRoute = field(default_factory=UpRoute)
 
-    debug_route: UpRoute = field(default_factory=DebugRoute)
+    debug_route: DebugRoute = field(default_factory=DebugRoute)
 
     http_server: HTTPServer = field(init=False)
 

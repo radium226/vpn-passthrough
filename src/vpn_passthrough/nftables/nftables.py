@@ -1,3 +1,4 @@
+from types import EllipsisType
 from pathlib import Path
 from typing import Callable
 from enum import StrEnum, auto
@@ -11,9 +12,9 @@ class Source(StrEnum):
     FILE = auto()
 
 
-def nftables(debug: bool = False, source: Source = ...):
+def nftables(debug: bool = False, source: Source | EllipsisType = ...):
     def decorator(func: Callable[..., None]) -> Callable[..., None]:
-        def closure(*args, **kwargs):
+        def closure(*args: str | int, **kwargs: str | int):
             func_name = func.__name__
             func_doc = func.__doc__
 
@@ -21,7 +22,7 @@ def nftables(debug: bool = False, source: Source = ...):
 
             script_file_path = Path(__file__).parent / "scripts" / f"{func_name}.nft"
             
-            script: str = ...
+            script: str | EllipsisType = ...
 
             match source:
                 case Source.DOC:
@@ -42,7 +43,8 @@ def nftables(debug: bool = False, source: Source = ...):
                         with script_file_path.open("r") as script_stream:
                             script = script_stream.read()
                     else:
-                        script = func_doc
+                        if func_doc:
+                            script = func_doc
 
             if script is ...:
                 raise Exception("Unable to infer the script!")
