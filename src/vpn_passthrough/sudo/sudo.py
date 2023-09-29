@@ -1,12 +1,12 @@
 from types import EllipsisType
-from typing import Callable
+from typing import Callable, Any
 from subprocess import run
 
 import dill
 
 
 def sudo(user: str | EllipsisType = ...):
-    def decorator(func: Callable[..., ...]) -> Callable[..., ...]:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         def closure(*args, **kwargs):
             input_payload = {
                 "func": func,
