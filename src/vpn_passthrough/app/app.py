@@ -41,7 +41,11 @@ def pass_through(
             ), 
             network_namespace=network_namespace,
         )
-        with pia.through_tunnel(forward_port=forward_port) as tunnel:
+        with pia.through_tunnel(region_name=region_name, forward_port=forward_port) as tunnel:
            run(command, network_namespace=network_namespace)
             
-                
+
+@app.command()
+def list_regions():
+    for region in PIA.list_regions():
+        print(region.name)

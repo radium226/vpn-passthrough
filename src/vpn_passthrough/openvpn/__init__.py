@@ -87,7 +87,7 @@ class OpenVPN:
             ] + 
             # (["--ca", str(ca_pem_file_path)] if (ca_pem_file_path := self.ca_pem_file_path) else []) + 
             (["--remote", str(remote)] if (remote := self.remote) else []) +
-            (["--auth-user-pass", str(file_path)] if (file_path := auth_pass_file_path) else []) +
+            (["--auth-user-pass", str(file_path), "--auth-nocache"] if (file_path := auth_pass_file_path) else []) +
             (["--port", str(port)] if (port := self.port) else [])
         )
 
