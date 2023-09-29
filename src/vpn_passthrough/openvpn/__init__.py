@@ -3,7 +3,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from subprocess import Popen, run
 from time import sleep
-from os import environ
+from os import environ, chmod
 from shutil import which
 
 from ..network_namespace import NetworkNamespace
@@ -62,6 +62,7 @@ class OpenVPN:
             auth_pass_file_path = Path("/tmp/pass.txt")
             with auth_pass_file_path.open("w") as f:
                 f.write(f"{self.credentials.user}\n{self.credentials.password}\n")
+                chmod(auth_pass_file_path, 0o600)
 
         
         if not (script_path := which("vpn-passthrough-openvpn-script")):
