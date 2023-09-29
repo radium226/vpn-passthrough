@@ -24,8 +24,6 @@ def app(
 ):
     client = ScriptClient()
 
-    print(f"NEW_NAMESERVER={NEW_NAMESERVER}")
-
     match script_type:
         case ScriptType.DEBUG:
             client.debug()

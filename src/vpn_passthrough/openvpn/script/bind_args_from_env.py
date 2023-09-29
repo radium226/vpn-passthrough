@@ -17,7 +17,6 @@ def bind_args_from_env():
     def decorator(func):
         def closure():
             params = signature(func).parameters
-            print(f"params={params}")
             kwargs = {}
             for param_name, param in params.items():
                 kwargs[param_name] = param.annotation(environ[param_name])

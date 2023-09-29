@@ -67,12 +67,10 @@ class JSONRoute(Route[dict, dict], Protocol):
 
     def parse_input(self, input_bytes: bytes) -> dict:
         input_str = input_bytes.decode("utf-8")
-        print(f"input_str={input_str}")
         return json.loads(input_str)
 
     def format_output(self, output: dict) -> bytes:
         output_str = json.dumps(output)
-        print(f"output_str={output_str}")
         output_bytes = output_str.encode("utf-8")
         return output_bytes
 

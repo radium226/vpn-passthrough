@@ -19,11 +19,9 @@ class UpRoute(JSONRoute):
     queue: Queue = Queue(maxsize=1)
 
     def matches(self, verb: Verb, url: URL) -> bool:
-        print(f"url={url}")
         return verb == Verb.POST and url == URL("/up")
     
     def handle(self, input: dict) -> dict:
-        print("We are here! ")
         self.queue.put(input)
         return {}
 
@@ -114,5 +112,3 @@ class ScriptClient():
                 "http://localhost/up",
                 json=info,
             )
-            print(response.json())
-            print("And now we are here! ")

@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-
-set -euEo pipefail
-
-set >>"/tmp/args"
-
-echo "$route_vpn_gateway" > "/tmp/gateway"
-
-echo "nameserver ${OLD_NAMESERVER}" >"/etc/resolv.conf"

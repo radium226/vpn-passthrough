@@ -12,6 +12,7 @@ from ..commons import Credentials, RegionName
 from subprocess import run
 from pathlib import Path
 from base64 import b64decode
+from ipaddress import IPv4Address
 
 from ..openvpn import OpenVPN
 
@@ -70,6 +71,8 @@ class PIA():
     SERVERS_URL: ClassVar[str] = "https://serverlist.piaservers.net/vpninfo/servers/v6"
 
     OPENVPN_CONFIG_FILE_PATH: ClassVar[Path] = Path(__file__).parent / "config.ovpn"
+
+    NAMESERVER_IP_ADDRESS: ClassVar[IPv4Address] = IPv4Address("10.0.0.242")
 
 
     @contextmanager
@@ -156,11 +159,7 @@ class PIA():
                 "-G", "--data-urlencode", f"token={token}",
                 f"https://{hostname}:19999/getSignature",
             ]
-            print(" ".join(command))
-
-            # from time import sleep
-            # sleep(60)
-
+            
             stdout = run(command, capture_output=True, text=True, check=True).stdout
             obj = json.loads(stdout)
             payload = obj["payload"]

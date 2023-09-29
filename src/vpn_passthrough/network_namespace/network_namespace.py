@@ -47,7 +47,7 @@ class NetworkNamespace:
     def exec(self, command: list[str], **kwargs):
         run(["sudo", "ip", "netns", "exec", self.name] + command, **kwargs)
 
-    def attach(self, func: Func) -> Func:
+    def attach(self, func: Func, capture_output: bool = True) -> Func:
         def closure(*args, **kwargs):
             input_payload = {
                 "func": func,
@@ -59,16 +59,20 @@ class NetworkNamespace:
             ip_command_part = ["sudo", "ip", "netns", "exec", str(self.name)]
             python_command_part = ["python", "-m", "vpn_passthrough.network_namespace"]
             command = ip_command_part + python_command_part
-            output_bytes = run(command, input=input_bytes, check=True, capture_output=True).stdout
-            output_payload = dill.loads(output_bytes)
-            return output_payload
+            process = run(command, input=input_bytes, check=True, capture_output=capture_output)
+            if capture_output:
+                output_bytes = process.stdout
+                output_payload = dill.loads(output_bytes)
+                return output_payload
+            else:
+                return None
 
         return closure
 
     def __enter__(self) -> "NetworkNamespace":
         self._write_resolv_conf_file(ip_addresses=NetworkNamespace.NAMESERVER_IP_ADDRESSES)
         self._setup_netns()
-        self._forward_network(veth_iface=NetworkNamespace.VETH_IFACE)
+        self._forward_traffic(veth_iface=NetworkNamespace.VETH_IFACE)
         return self
 
     def __exit__(self, type, value, traceback):
@@ -96,12 +100,13 @@ class NetworkNamespace:
     @sudo()
     def _write_resolv_conf_file(self, ip_addresses: list[IPv4Address]) -> None:
         resolv_conf_file_path = Path("/etc/netns") / self.name / "resolv.conf"
+        resolv_conf_file_path.parent.mkdir(parents=True, exist_ok=True)
         with resolv_conf_file_path.open("w") as f:
             for ip_address in ip_addresses:
                 f.write(f"nameserver {ip_address}\n")
 
     @nftables()
-    def _forward_network(self, veth_iface: str) -> None:
+    def _forward_traffic(self, veth_iface: str) -> None:
         """
             table inet filter {
                 chain forward {

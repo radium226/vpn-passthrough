@@ -28,7 +28,7 @@ def test_attach():
         assert add(2, 3) == 5
 
 
-@executable
+@executable()
 def netns_id():
     return NetworkNamespace.current().name
 

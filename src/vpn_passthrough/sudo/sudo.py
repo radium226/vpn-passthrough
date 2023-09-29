@@ -18,7 +18,8 @@ def sudo(user: str | EllipsisType = ...):
             sudo_command_part = ["sudo", "--preserve-env"] + ([f"--user={user}"] if user is not ... else [])
             python_command_part = ["python", "-m", "vpn_passthrough.sudo"]
             command = sudo_command_part + python_command_part
-            output_bytes = run(command, input=input_bytes, check=True, capture_output=True).stdout
+            process = run(command, input=input_bytes, capture_output=True)
+            output_bytes = process.stdout
             output_payload = dill.loads(output_bytes)
             return output_payload
 

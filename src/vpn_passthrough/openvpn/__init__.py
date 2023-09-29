@@ -70,6 +70,7 @@ class OpenVPN:
         openvpn_command_part = (
             [
                 "openvpn",
+                    "--verb", "0",
                     "--config", str(self.config_file_path),
                     "--dev", OpenVPN.TUNNEL_IFACE,
                     "--errors-to-stderr",
@@ -81,10 +82,6 @@ class OpenVPN:
                     "--setenv", "script_socket_path", "208.67.222.222",
                     "--setenv", "PATH", environ["PATH"],
                     "--up", script_path,
-                    "--setenv", "NEW_NAMESERVER", "10.0.0.242",
-                    "--setenv", "OLD_NAMESERVER", "208.67.222.222",
-                    "--setenv", "script_socket_path", "208.67.222.222",
-                    "--setenv", "PATH", environ["PATH"],
                     "--down", script_path,
             ] + 
             # (["--ca", str(ca_pem_file_path)] if (ca_pem_file_path := self.ca_pem_file_path) else []) + 
@@ -92,8 +89,6 @@ class OpenVPN:
             (["--auth-user-pass", str(file_path)] if (file_path := auth_pass_file_path) else []) +
             (["--port", str(port)] if (port := self.port) else [])
         )
-
-        print(f"openvpn_command_part={openvpn_command_part}")
 
         command = sudo_command_part + ip_command_part + openvpn_command_part
         self._process = Popen(command, env=environ | {"PATH": environ["PATH"]})
