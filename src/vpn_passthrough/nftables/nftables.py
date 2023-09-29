@@ -53,7 +53,15 @@ def nftables(debug: bool = False, source: Source | EllipsisType = ...):
                 message = script.format(**kwargs)
                 run(["echo", message], check=True)
             else:
-                nft_command = ["sudo", "nft", "-f", "-"] + (["-c"] if check else [])
+                nft_command = (
+                    (["sudo", "nft", "--f", "-"]) + 
+                    (["--check"] if check else []) + 
+                    ([
+                        arg 
+                        for key, value in kwargs.items() 
+                        for arg in ["--define", f"{key}={value}"]
+                    ])
+                )
                 run(nft_command, input=script, check=True, text=True)
 
         return closure

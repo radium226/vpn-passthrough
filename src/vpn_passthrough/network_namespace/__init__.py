@@ -5,7 +5,11 @@ from textwrap import dedent
 from pathlib import Path
 from enum import Enum, auto
 from io import BytesIO
+from ipaddress import IPv4Address
 import dill
+
+from ..nftables import nftables
+from ..sudo import sudo
 
 
 NetworkNamespaceName = NewType("NetworkNamespaceName", str)
@@ -30,10 +34,15 @@ class NetworkNamespace:
     name: NetworkNamespaceName
 
     VPEER_IFACE: ClassVar[str] = "vpeer1"
-    VPEER_ADDR: ClassVar[str] = "10.200.1.1"
+    VPEER_ADDR: ClassVar[IPv4Address] = IPv4Address("10.200.1.1")
     
     VETH_IFACE: ClassVar[str] = "veth1"
-    VETH_ADDR: ClassVar[str] = "10.200.1.2"
+    VETH_ADDR: ClassVar[IPv4Address] = IPv4Address("10.200.1.2")
+
+    NAMESERVER_IP_ADDRESSES: ClassVar[list[IPv4Address]] = [
+        IPv4Address("208.67.222.222"),
+        IPv4Address("208.67.220.220"),
+    ] 
 
     @staticmethod
     def current() -> "NetworkNamespace":
@@ -64,50 +73,62 @@ class NetworkNamespace:
         return closure
 
     def __enter__(self) -> "NetworkNamespace":
-
-        write_file(
-            dedent("""\
-            nameserver 208.67.222.222
-            nameserver 208.67.220.220
-            """),
-            Path("/etc/netns") / self.name / "resolv.conf"
-        )
-
-        # Create the namespace
-        run(["sudo", "ip", "netns", "add", self.name], check=True)
-        
-        # Create the veth link and put the peer in the namespace
-        run(["sudo", "ip", "link", "add", NetworkNamespace.VETH_IFACE, "type", "veth", "peer", "name", NetworkNamespace.VPEER_IFACE, "netns", self.name], check=True)
-        
-        # Setup IP address of veth side
-        run(["sudo", "ip", "addr", "add", f"{NetworkNamespace.VETH_ADDR}/24", "dev", NetworkNamespace.VETH_IFACE], check=True)
-        run(["sudo", "ip", "link", "set", NetworkNamespace.VETH_IFACE, "up"], check=True)
-
-        # Setup address of vpeer side within namespace
-        self.exec(["ip", "addr", "add", f"{NetworkNamespace.VPEER_ADDR}/24", "dev", NetworkNamespace.VPEER_IFACE], check=True)
-        self.exec(["ip", "link", "set", NetworkNamespace.VPEER_IFACE, "up"], check=True)
-        
-        # Setup loopback within namespace
-        self.exec(["ip", "link", "set", "lo", "up"], check=True)
-        self.exec(["ip", "route", "add", "default", "via", NetworkNamespace.VETH_ADDR], check=True)
-
-        nftables_conf_file_path = Path(__file__).parent / "nftables.conf"
-        run(["sudo", "nft", "--file", str(nftables_conf_file_path), "--define", f"veth_iface={NetworkNamespace.VETH_IFACE}"], check=True)
-        
+        self._write_resolv_conf_file(ip_addresses=NetworkNamespace.NAMESERVER_IP_ADDRESSES)
+        self._setup_netns()
+        self._forward_network(veth_iface=NetworkNamespace.VETH_IFACE)
         return self
 
     def __exit__(self, type, value, traceback):
+        self._teardown_netns()
+
+    def _teardown_netns(self) -> None:
         run(["sudo", "ip", "link", "del", NetworkNamespace.VETH_IFACE], check=True)
         run(["sudo", "ip", "netns", "del", self.name], check=True)
 
+    def _setup_netns(self) -> None:
+        # Create the namespace
+        run(["sudo", "ip", "netns", "add", self.name], check=True)
+        # Create the veth link and put the peer in the namespace
+        run(["sudo", "ip", "link", "add", NetworkNamespace.VETH_IFACE, "type", "veth", "peer", "name", NetworkNamespace.VPEER_IFACE, "netns", self.name], check=True)
+        # Setup IP address of veth side
+        run(["sudo", "ip", "addr", "add", f"{NetworkNamespace.VETH_ADDR}/24", "dev", NetworkNamespace.VETH_IFACE], check=True)
+        run(["sudo", "ip", "link", "set", NetworkNamespace.VETH_IFACE, "up"], check=True)
+        # Setup address of vpeer side within namespace
+        self.exec(["ip", "addr", "add", f"{NetworkNamespace.VPEER_ADDR}/24", "dev", NetworkNamespace.VPEER_IFACE], check=True)
+        self.exec(["ip", "link", "set", NetworkNamespace.VPEER_IFACE, "up"], check=True)
+        # Setup loopback within namespace
+        self.exec(["ip", "link", "set", "lo", "up"], check=True)
+        self.exec(["ip", "route", "add", "default", "via", f"{NetworkNamespace.VETH_ADDR}"], check=True)
 
-def write_file(content: str, file_path: Path):
-    run(["sudo", "mkdir", "-p", str(file_path.parent)], check=True)
-    tee_process = Popen(["sudo", "tee", str(file_path)], stdin=PIPE, stdout=DEVNULL, text=True)
-    if stdin := tee_process.stdin:
-        stdin.write(content)
-        stdin.close()
-    tee_process.wait()
+    @sudo()
+    def _write_resolv_conf_file(self, ip_addresses: list[IPv4Address]) -> None:
+        resolv_conf_file_path = Path("/etc/netns") / self.name / "resolv.conf"
+        with resolv_conf_file_path.open("w") as f:
+            for ip_address in ip_addresses:
+                f.write(f"nameserver {ip_address}\n")
+
+    @nftables()
+    def _forward_network(self, veth_iface: str) -> None:
+        """
+            table inet filter {
+                chain forward {
+                    type filter hook forward priority 0; policy accept;
+                    iifname $veth_iface counter accept;
+                    oifname $veth_iface counter accept;
+                }
+            }
+
+            # Postrouting masquerade
+            table inet nat {
+                chain prerouting {
+                    type nat hook prerouting priority dstnat; policy accept;
+                }
+                chain postrouting {
+                    type nat hook postrouting priority srcnat; policy accept;
+                    masquerade random
+                }
+            }
+        """
 
 
 def list_network_namespaces() -> list[NetworkNamespace]:
