@@ -1,4 +1,5 @@
-from typing import ClassVar, Any
+from contextlib import contextmanager
+from typing import ClassVar, Any, Generator
 from dataclasses import dataclass, field
 from requests.auth import HTTPBasicAuth
 from requests import Session
@@ -10,6 +11,8 @@ from ..commons import Credentials, RegionName
 from subprocess import run
 from pathlib import Path
 from base64 import b64decode
+
+from ..openvpn import OpenVPN
 
 
 class ServerType(StrEnum):
@@ -47,20 +50,56 @@ class PayloadAndSignature():
 
 
 @dataclass
+class Tunnel():
+
+    forwared_port: int | None = None
+
+
+@dataclass
 class PIA():
 
     credentials: Credentials
 
     network_namespace: NetworkNamespace | None = None
 
+    DEFAULT_REGION_NAME: ClassVar[str] = RegionName("Serbia")
+
     GENERATE_TOKEN_URL: ClassVar[str] = "https://privateinternetaccess.com/gtoken/generateToken"
+
     SERVERS_URL: ClassVar[str] = "https://serverlist.piaservers.net/vpninfo/servers/v6"
 
-    def __enter__(self):
-        return self
+    OPENVPN_CONFIG_FILE_PATH: ClassVar[Path] = Path(__file__).parent / "config.ovpn"
 
-    def __exit__(self, type, value, traceback):
-        pass
+
+    @contextmanager
+    def through_tunnel(self, *, region_name: RegionName = ...,  forward_port: bool = False) -> Generator[Tunnel, None, None]:
+        if region_name is ...:
+            region_name = self.DEFAULT_REGION_NAME
+
+        if not (region := next((region for region in self.list_regions() if region.name == region_name), None)):
+            raise Exception("Unable to find region! ")
+        
+        if not (server := next(iter(region.servers_by_type[ServerType.OPENVPN_UDP]), None)):
+            raise Exception("Unable to find a server for OpenVPN! ")
+        
+        with OpenVPN(
+            config_file_path=self.OPENVPN_CONFIG_FILE_PATH,
+            remote=f"{region.dns_host}",
+            port=1198,
+            ca_pem_file_path=Path(__file__).parent / "ca.rsa.4096.crt",
+            network_namespace=self.network_namespace,
+            credentials=self.credentials,
+        ) as openvpn_tunnel:
+            if forward_port:
+                forwared_port = self.forward_port(
+                    hostname=server.common_name,
+                    gateway=openvpn_tunnel.gateway,
+                )
+            else:
+                forwared_port = None
+            yield Tunnel(
+                forwared_port=forwared_port,
+            )
 
     def generate_token(self) -> str:
         auth = HTTPBasicAuth(self.credentials.user, self.credentials.password)
@@ -164,4 +203,19 @@ class PIA():
         return {
             region.name: region for region in self.list_regions()
         }
+    
+    def generate_openvpn_config(self, *, region_name: RegionName) -> Path:
+        if (region := next(self.regions_by_name[region_name], None)):
+            server = next(region.servers_by_type[ServerType.OPENVPN_UDP])
+            
+            with Path("/tmp/config.ovpn").open("w") as f:
+                with Path(__file__).parent / "config.ovpn" as t:
+                    f.write(t.read())
+                f.write()
+
+        
+    
+    def _convert_cert_to_pem(self, crt_file_path: Path) -> Path:
+        run(["openssl", "x509", "-in", f"{crt_file_path}", "-out", "mycert.pem", "-outform", "PEM"])
+
     

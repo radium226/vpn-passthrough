@@ -7,6 +7,7 @@ from os import environ
 from shutil import which
 
 from ..network_namespace import NetworkNamespace
+from ..commons import Credentials
 from .script import ScriptServer
 
 @dataclass
@@ -18,10 +19,20 @@ class Tunnel():
 @dataclass
 class OpenVPN:
 
-    country: str = "serbia"
-    config_folder_path: Path | None = None
+    # country: str = "serbia"
+    # config_folder_path: Path | None = None
+
+    config_file_path: Path
+
+    remote: str | None = None
+
+    ca_pem_file_path: Path | None = None
 
     network_namespace: NetworkNamespace | None = None
+
+    credentials: Credentials | None = None
+
+    port: int | None = None
 
     CONFIG_FOLDER_PATH: ClassVar[Path] = Path("./openvpn")
     TUNNEL_IFACE: ClassVar[str] = "tun0"
@@ -36,9 +47,6 @@ class OpenVPN:
         return tunnel
 
     def open_tunnel(self) -> Tunnel:
-        config_folder_path = self.config_folder_path or OpenVPN.CONFIG_FOLDER_PATH
-        config_file_path = Path(f"{self.country}.ovpn")
-
         sudo_command_part = ["sudo", "-E"]
 
         ip_command_part = ["ip", "netns", "exec", network_namespace.name] if (network_namespace := self.network_namespace) else []
@@ -48,28 +56,41 @@ class OpenVPN:
         script_server = ScriptServer(socket_path=script_socket_path)
         script_server.start()
         self._script_server = script_server
+    
+        auth_pass_file_path: Path | None = None
+        if self.credentials:
+            auth_pass_file_path = Path("/tmp/pass.txt")
+            with auth_pass_file_path.open("w") as f:
+                f.write(f"{self.credentials.user}\n{self.credentials.password}\n")
 
-        openvpn_command_part = [
-            "openvpn",
-                "--cd", str(config_folder_path),
-                "--config", str(config_file_path),
-                "--dev", OpenVPN.TUNNEL_IFACE,
-                "--auth-user-pass", "pass.txt",
-                "--errors-to-stderr",
-                "--pull-filter", "ignore", "route-ipv6",
-                "--pull-filter", "ignore", "ifconfig-ipv6",
-                "--script-security", "2", \
-                "--setenv", "NEW_NAMESERVER", "10.0.0.242",
-                "--setenv", "OLD_NAMESERVER", "208.67.222.222",
-                "--setenv", "script_socket_path", "208.67.222.222",
-                "--setenv", "PATH", environ["PATH"],
-                "--up", which("vpn-passthrough-openvpn-script"),
-                "--setenv", "NEW_NAMESERVER", "10.0.0.242",
-                "--setenv", "OLD_NAMESERVER", "208.67.222.222",
-                "--setenv", "script_socket_path", "208.67.222.222",
-                "--setenv", "PATH", environ["PATH"],
-                "--down", which("vpn-passthrough-openvpn-script"),
-        ]
+
+        openvpn_command_part = (
+            [
+                "openvpn",
+                    "--config", str(self.config_file_path),
+                    "--dev", OpenVPN.TUNNEL_IFACE,
+                    "--errors-to-stderr",
+                    "--pull-filter", "ignore", "route-ipv6",
+                    "--pull-filter", "ignore", "ifconfig-ipv6",
+                    "--script-security", "2", \
+                    "--setenv", "NEW_NAMESERVER", "10.0.0.242",
+                    "--setenv", "OLD_NAMESERVER", "208.67.222.222",
+                    "--setenv", "script_socket_path", "208.67.222.222",
+                    "--setenv", "PATH", environ["PATH"],
+                    "--up", which("vpn-passthrough-openvpn-script"),
+                    "--setenv", "NEW_NAMESERVER", "10.0.0.242",
+                    "--setenv", "OLD_NAMESERVER", "208.67.222.222",
+                    "--setenv", "script_socket_path", "208.67.222.222",
+                    "--setenv", "PATH", environ["PATH"],
+                    "--down", which("vpn-passthrough-openvpn-script"),
+            ] + 
+            # (["--ca", str(ca_pem_file_path)] if (ca_pem_file_path := self.ca_pem_file_path) else []) + 
+            (["--remote", str(remote)] if (remote := self.remote) else []) +
+            (["--auth-user-pass", str(file_path)] if (file_path := auth_pass_file_path) else []) +
+            (["--port", str(port)] if (port := self.port) else [])
+        )
+
+        print(f"openvpn_command_part={openvpn_command_part}")
 
         command = sudo_command_part + ip_command_part + openvpn_command_part
         self._process = Popen(command, env=environ | {"PATH": environ["PATH"]})

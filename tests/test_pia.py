@@ -39,8 +39,13 @@ def openvpn(pia_credentials: Credentials) -> OpenVPN:
 @require_pia_credentials()
 def test_list_regions(pia: PIA):
     regions = pia.list_regions()
-    print(regions)
     assert len(regions) > 0
+
+    serbia_region = next((region for region in regions if region.name == "Serbia"), None)
+    assert serbia_region is not None
+
+    print(f"serbia_region={serbia_region}")
+    
 
 
 @require_pia_credentials()
@@ -84,3 +89,19 @@ def test_forward_port(pia_credentials: Credentials):
 
 
 
+@require_pia_credentials()
+def test_through_tunnel(pia_credentials: Credentials):
+    with NetworkNamespace(name="test_openvpn-test_port_forward") as network_namespace:
+        pia = PIA(
+            credentials=pia_credentials,
+            network_namespace=network_namespace,
+        )
+        with pia.through_tunnel(forward_port=True) as tunnel:
+            ip_address = find_ip(network_namespace=network_namespace)
+            check_connectivity(
+                local_port=tunnel.forwared_port,
+                remote_port=tunnel.forwared_port,
+                local_address="0.0.0.0",
+                remote_address=ip_address,
+                network_namespace=network_namespace,
+            )
