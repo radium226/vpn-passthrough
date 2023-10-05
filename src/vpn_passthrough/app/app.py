@@ -13,9 +13,9 @@ def app():
 
 
 @executable(capture_output=False)
-def run(command: list[str]) -> None:
+def run(command: list[str], forwarded_port: int | None = None) -> None:
     from subprocess import run
-    run(command)
+    run(command, env)
 
 
 @app.command()

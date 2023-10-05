@@ -13,6 +13,8 @@ dependencies = [
     "click-default-group>=1.2.4",
     "dill>=0.3.7",
     "httpx>=0.25.0",
+    "cherrypy>=18.8.0",
+    "dbus-fast>=2.11.0",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
@@ -31,6 +33,7 @@ dev = [
     "types-requests>=2.31.0.2",
     "types-click-default-group>=1.2.0.0",
     "pytest-timeout>=2.1.0",
+    "shiv>=1.0.4",
 ]
 
 [[tool.mypy.overrides]]
