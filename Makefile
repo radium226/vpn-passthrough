@@ -16,6 +16,11 @@ help: ## Display this message
 
 
 
+.PHONY: run
+run: ## Run the application
+	@ mise exec -- uv run vpn-passthrough
+
+
 ##@ Checks
 .PHONY: check
 check: mypy ruff pytest ## Run all checks
