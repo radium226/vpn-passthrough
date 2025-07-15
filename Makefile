@@ -1,0 +1,44 @@
+SHELL := bash
+.SHELLFLAGS := -euEo pipefail -c
+
+.ONESHELL:
+
+
+.DEFAULT_GOAL := help
+
+
+# Targets
+
+##@ General
+.PHONY: help
+help: ## Display this message
+	@ awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+
+
+##@ Checks
+.PHONY: check
+check: mypy ruff pytest ## Run all checks
+	@ echo "Running all checks..." >&2
+	@ $(MAKE) mypy
+	@ $(MAKE) ruff
+	@ $(MAKE) pytest
+	@ echo "All checks passed!" >&2
+
+
+
+.PHONY: mypy
+mypy: ## Run mypy
+	mise exec -- uv run mypy -p "radium226.vpn_passthrough"
+
+
+
+.PHONY: ruff
+ruff: ## Run ruff
+	mise exec -- uv run ruff check "src/radium226/vpn_passthrough"
+
+
+
+.PHONY: pytest
+pytest: ## Run pytest
+	mise exec -- uv run pytest
