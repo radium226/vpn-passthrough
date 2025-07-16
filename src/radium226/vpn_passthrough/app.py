@@ -125,6 +125,18 @@ def show_ip(context: Context) -> None:
         vpn_passthrough.exec(["curl", "-s", "https://api.ipify.org"])
 
 
+@app.command()
+@pass_context
+def test_dns_leak(context: Context) -> None:
+    config = cast(Config, context.obj)
+    pia_region = config.pia_region
+    pia_credentials = config.pia_credentials
+    name = config.name or "dl"
+
+    with open_vpn_passthrough(name, pia_region=pia_region, pia_credentials=pia_credentials) as vpn_passthrough:
+        vpn_passthrough.exec(["dnsleaktest"])
+
+
 @app.group()
 def pia() -> None:
     """Commands for managing PIA VPN passthrough."""
