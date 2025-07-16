@@ -7,8 +7,11 @@ from contextlib import (
 from loguru import logger
 from .netns import create_netns, NetNS
 from .network_interfaces import create_network_interfaces, VEth, VPeer
-from .port_forwarding import start_port_forwarding, PortForwarding
 from .internet import share_internet
+from .openvpn import start_openvpn
+from .pia import Region, Credentials, NAMESERVER_IP_ADDR
+from .dns import setup_dns
+from .pipewire import bind_pipewire
 
 
 
@@ -18,7 +21,6 @@ class VPNPassthrough:
     name: str
     netns: NetNS
     veth: VEth
-    port_forwarding: PortForwarding
     
     def exec(self, command: list[str]) -> None:
         logger.debug(f"Executing command in VPNPassthrough {self.name}: {command}")
@@ -27,7 +29,11 @@ class VPNPassthrough:
 
 
 @contextmanager
-def open_vpn_passthrough(name: str) -> Generator[VPNPassthrough, None, None]:
+def open_vpn_passthrough(
+    name: str, 
+    pia_region: Region,
+    pia_credentials: Credentials,
+) -> Generator[VPNPassthrough, None, None]:
     exit_stack = ExitStack()
     try:
         veth = VEth(name=f"{name}-veth", addr="10.200.1.2")
@@ -39,19 +45,27 @@ def open_vpn_passthrough(name: str) -> Generator[VPNPassthrough, None, None]:
             vpeer=vpeer, 
             veth=veth,
         ))
+
         exit_stack.enter_context(share_internet(
             name=name, 
             network_interfaces=network_interfaces, 
-            netns=netns,
         ))
 
+        exit_stack.enter_context(start_openvpn(
+            netns=netns,
+            pia_region=pia_region,  
+            pia_credentials=pia_credentials,
+        ))
 
-        port_forwarding = exit_stack.enter_context(start_port_forwarding())
+        setup_dns(
+            NAMESERVER_IP_ADDR,
+            netns=netns,
+        )
+
         yield VPNPassthrough(
             name=name, 
             netns=netns, 
             veth=veth,
-            port_forwarding=port_forwarding,
         )
     finally:
         exit_stack.close()

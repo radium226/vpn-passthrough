@@ -9,16 +9,13 @@ from .netns import NetNS
 
 
 @contextmanager
-def share_internet(name: str, network_interfaces: NetworkInterfaces, netns: NetNS) -> Generator[None, None, None]:
+def share_internet(name: str, network_interfaces: NetworkInterfaces) -> Generator[None, None, None]:
     """
     Context manager to share internet connection.
     This is a placeholder for the actual implementation.
     """
     logger.debug("Sharing internet connection...")
     try:
-        resolv_conf_file_path = Path("/etc/netns") / netns.name / "resolv.conf"
-        resolv_conf_file_path.parent.mkdir(parents=True, exist_ok=True)
-        resolv_conf_file_path.write_text("nameserver 10.0.0.242")
         command=[
             "nft",
             "-f", str(Path(__file__).parent / "internet.nft"),
