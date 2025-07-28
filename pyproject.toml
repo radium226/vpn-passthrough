@@ -6,13 +6,19 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "click>=8.2.1",
+    "click-default-group>=1.2.4",
+    "httpx>=0.28.1",
+    "jc>=1.25.5",
     "loguru>=0.7.3",
     "pyyaml>=6.0.2",
     "requests>=2.32.4",
+    "sdbus>=0.14.0",
 ]
 
 [project.scripts]
-vpn-passthrough = "radium226.vpn_passthrough:app"
+vpn-passthrough = "radium226.vpn_passthrough.client.cli:app"
+vpn-passthroughd = "radium226.vpn_passthrough.server.cli:app"
+
 
 [build-system]
 requires = ["hatchling"]
@@ -25,13 +31,19 @@ packages = ["src/radium226"]
 dev = [
     "mypy>=1.17.0",
     "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
     "ruff>=0.12.3",
     "types-requests>=2.32.4.20250611",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--capture=no"
+addopts = "--capture=no --strict-markers"
+asyncio_mode = "auto"
+markers = [
+    "e2e: End-to-end tests",
+    "sudo: Tests that require sudo privileges",
+]
 
 [tool.mypy]
 strict = true

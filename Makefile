@@ -23,7 +23,7 @@ run: ## Run the application
 
 ##@ Checks
 .PHONY: check
-check: mypy ruff pytest ## Run all checks
+check: ## Run all checks
 	@ echo "Running all checks..." >&2
 	@ $(MAKE) mypy
 	@ $(MAKE) ruff
@@ -45,5 +45,29 @@ ruff: ## Run ruff
 
 
 .PHONY: pytest
-pytest: ## Run pytest
-	mise exec -- uv run pytest
+pytest: ## Run the tests using pytest
+	mise exec -- uv run pytest -k "(not e2e) and (not sudo)"
+
+
+.PHONY: pytest-e2e
+pytest-e2e: ## Run end-to-end tests using pytest
+	mise exec -- uv run pytest -k "e2e"
+
+
+.PHONY: pytest-sudo
+pytest-sudo: ## Run tests that require sudo privileges
+	mise exec -- uv sync
+	mise exec -- sudo -E sh -c 'source "./.venv/bin/activate" && pytest -k "sudo"'
+
+
+.PHONY: reset
+reset: ## Reset the environment
+	sudo systemctl stop docker.service docker.socket
+	sudo nft flush ruleset
+	sudo sysctl -w net.ipv4.ip_forward=1
+	sudo sysctl -w net.ipv6.conf.all.forwarding=1
+
+
+.PHONY: start-server
+start-server:
+	mise exec -- sudo -E sh -c 'source "./.venv/bin/activate" && vpn-passthroughd'

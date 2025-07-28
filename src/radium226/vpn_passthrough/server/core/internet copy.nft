@@ -1,0 +1,25 @@
+table inet vpt {
+    chain forward {
+        type filter hook forward priority 0; policy accept;
+        # Allow traffic from the single IP address
+        ip saddr $server_ip counter accept;
+        # Allow traffic to the single IP address
+        ip daddr $server_ip counter accept;
+
+        # The following original rules are now redundant but can remain
+        # iifname $veth_name counter accept;
+        # oifname $veth_name counter accept;
+
+        # Drop all other forwarded traffic
+        counter drop;
+    }
+
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+    }
+
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        masquerade random
+    }
+}
