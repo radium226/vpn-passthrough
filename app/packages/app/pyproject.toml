@@ -1,0 +1,41 @@
+[project]
+name = "radium226-vpn-passthrough-app"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "radium226", email = "radium226@rouages.xyz" }
+]
+requires-python = ">=3.14"
+dependencies = ["click", "prettytable", "pyyaml", "radium226-vpn-passthrough-server", "radium226-vpn-passthrough-client"]
+
+[project.scripts]
+vpn-passthrough = "radium226.vpn_passthrough.app.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.10.3,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "radium226.vpn_passthrough.app"
+
+[tool.uv.sources]
+radium226-vpn-passthrough-server = { workspace = true }
+radium226-vpn-passthrough-client = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.0.0",
+    "ruff>=0.15.4",
+    "ty>=0.0.19",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+src = ["src"]
+
+[tool.ty.src]
+include = ["src"]

@@ -1,0 +1,18 @@
+[tools]
+# Add your project tools here
+# Examples:
+# node = "20"
+# python = "3.12"
+# go = "1.21"
+# rust = "latest"
+
+[env]
+# Environment variables for this project
+# _.file = ".env"
+# _.path = "bin"
+
+[tasks]
+# Define project tasks here
+# Example:
+# [tasks.test]
+# run = "make test"

@@ -1,0 +1,24 @@
+[project]
+name = "radium226-vpn-passthrough-messages"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = ["pydantic>=2.12.5", "radium226-vpn-passthrough-ipc"]
+
+[build-system]
+requires = ["uv_build>=0.10.3,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "radium226.vpn_passthrough.messages"
+
+[tool.uv.sources]
+radium226-vpn-passthrough-ipc = { workspace = true }
+
+[dependency-groups]
+dev = ["ruff>=0.15.4", "ty>=0.0.19"]
+
+[tool.ruff]
+src = ["src"]
+
+[tool.ty.src]
+include = ["src"]

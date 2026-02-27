@@ -1,0 +1,10 @@
+---
+variables:
+- name: PIA_USER
+  type: text
+  value: encrypted:YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBKN0laUExYU0tQMHFJSTM4Qm82RHdDL2lHYitPSHpQWmgwZTNRSFZkZ3o0CklacVB1UzErSGFBR2tESWdVUHRYQzhxV1R4S2hjVG05RWlYZlVhZmtrTFkKLS0tIDlnZ0NJUmZXanU3MC9Hb29qRC9sWGZBZmEzTW15ZHBsZDhtNUxoMmRieWMKnw2ceIHOj9PpkC0u+IprbgH3m3biT6KrEVfKK+9yvxrdT+4qKeXdTQ==
+  visibility: secret
+- name: PIA_PASS
+  type: text
+  value: encrypted:YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBQaWYvL0hzbGtXMFNrVmlsMUVqRDhhRFpuVEEvVTFiNWp3dXFCNlNYL0dVCkhDenZHZnRlajlHbTdrR2VQb2ZIb01POWdrcnNEWmYxM3Z0Z1E1OEFFb1EKLS0tIDlhejZBdmFLUythdXFxaW5NdlFUN055QTUrc0czejNZRGVVeW11dmszVHcKFoicTGeZxwvGmBreWRJQ1uT8LfiFRIpaUdz1wJZacC+P2leb6OyKJwR13Q==
+  visibility: secret

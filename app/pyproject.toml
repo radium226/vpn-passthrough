@@ -1,0 +1,2 @@
+[tool.uv.workspace]
+members = ["packages/ipc", "packages/messages", "packages/server", "packages/client", "packages/app", "packages/pia"]

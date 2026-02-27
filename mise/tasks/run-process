@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euEo pipefail
+
+main()
+{
+    uv run vpn-passthrough \
+        run-process \
+            --in-tunnel="test" \
+            -- \
+            python \
+                -m "http.server" \
+                    --bind "{{ tun_ip }}" \
+                    "{{ forwarded_ports[0] }}"
+}
+
+main "${@}"

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+set -euEo pipefail
+
+main()
+{
+    local script
+    read -r -d '' script << 'SCRIPT' || true
+echo '{{ public_ip }}:{{ forwarded_ports[0] if forwarded_ports else 8080 }}'
+python3 << 'PYEOF'
+import http.server
+
+HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hello World – VPN Passthrough</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 4rem auto; }
+    h1   { color: #333; }
+  </style>
+</head>
+<body>
+  <h1>Hello, World!</h1>
+  <p>Served from inside a VPN passthrough tunnel.</p>
+</body>
+</html>""".encode()
+
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(HTML)
+
+http.server.HTTPServer(("{{ tun_ip }}", {{ forwarded_ports[0] if forwarded_ports else 8080 }}), H).serve_forever()
+PYEOF
+SCRIPT
+
+    uv run vpn-passthrough \
+        run-process \
+            --in-tunnel="test" \
+            --port-rebind-every=60 \
+            -- \
+            bash -c "$script"
+}
+
+main "${@}"

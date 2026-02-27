@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -euEo pipefail
+
+main()
+{
+    uvx \
+        --from="git+https://github.com/radium226/variables.git" \
+            variables \
+                exec \
+                    -v "./variables.yaml" \
+                    -- \
+                        uv run vpn-passthrough \
+                            run-process \
+                                --in-tunnel="test" \
+                                -- \
+                                dnsleaktest
+}
+
+main "${@}"

@@ -1,0 +1,35 @@
+[project]
+name = "radium226-vpn-passthrough-ipc"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "radium226", email = "radium226@rouages.xyz" }
+]
+requires-python = ">=3.14"
+dependencies = ["click>=8.0", "loguru>=0.7", "pydantic>=2.12.5"]
+
+
+[build-system]
+requires = ["uv_build>=0.10.3,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "radium226.vpn_passthrough.ipc"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.0.0",
+    "ruff>=0.15.4",
+    "ty>=0.0.19",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+src = ["src"]
+
+[tool.ty.src]
+include = ["src"]
