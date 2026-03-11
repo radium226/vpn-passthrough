@@ -1,4 +1,8 @@
-# vpn-passthrough
+# VPN Passthrough
+
+> [!IMPORTANT]
+> If you're watching this page from [the repo in GitHub](https://github.com/radium226/vpn-passthrough), please note it's only a read-only mirror from [the repo in SourceHut](https://git.sr.ht/~radium226/vpn-passthrough). 
+> You can follow the tickets in [this tracker](https://todo.sr.ht/~radium226/vpn-passthrough).
 
 A daemon-based system for executing commands inside isolated Linux network namespaces with optional VPN connectivity via Private Internet Access (PIA). Processes run in complete network isolation, with DNS leak prevention enforced at the kernel level.
 
