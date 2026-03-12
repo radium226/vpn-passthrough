@@ -1,0 +1,88 @@
+#!/usr/bin/env -S uv run --script
+#MISE description "Close a ticket: squash merge to main, push, close ticket, delete branch"
+#USAGE flag "--tracker <tracker>" help="Tracker name" default="vpn-passthrough"
+
+# /// script
+# requires-python = ">=3.13"
+# ///
+
+import os
+import re
+import subprocess
+import sys
+
+
+def run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, text=True, capture_output=True, **kwargs)
+
+
+def run_or_die(command: list[str]) -> None:
+    result = subprocess.run(command)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+def current_branch() -> str:
+    result = run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    if result.returncode != 0:
+        print("Error: not in a git repository", file=sys.stderr)
+        sys.exit(1)
+    return result.stdout.strip()
+
+
+def parse_branch(branch: str) -> tuple[int, str]:
+    match = re.match(r"^ticket/(\d+)-(.+)$", branch)
+    if not match:
+        print(f"Error: branch '{branch}' does not match ticket/<id>-<slug> format", file=sys.stderr)
+        sys.exit(1)
+    return int(match.group(1)), match.group(2)
+
+
+def fetch_ticket_subject(tracker: str, ticket_id: int) -> str:
+    result = run(["hut", "todo", "ticket", "show", "-t", tracker, str(ticket_id)])
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr, end="")
+        sys.exit(1)
+    return result.stdout.splitlines()[0]
+
+
+def main():
+    tracker = os.environ.get("usage_tracker", "vpn-passthrough")
+
+    branch = current_branch()
+    if branch == "main":
+        print("Error: already on main", file=sys.stderr)
+        sys.exit(1)
+
+    ticket_id, _ = parse_branch(branch)
+    subject = fetch_ticket_subject(tracker, ticket_id)
+    commit_message = f"[#{ticket_id}] {subject}"
+
+    print(f"Closing ticket #{ticket_id}: {subject}")
+    print(f"Commit message: {commit_message}")
+    print()
+
+    # Switch to main and squash merge the ticket branch
+    run_or_die(["git", "checkout", "main"])
+    run_or_die(["git", "merge", "--squash", branch])
+    run_or_die(["git", "commit", "-m", commit_message])
+
+    # Push main
+    run_or_die(["git", "push"])
+
+    # Close the ticket on sourcehut
+    result = run(["hut", "todo", "ticket", "update-status", "-t", tracker, str(ticket_id), "-s", "resolved", "-r", "fixed"])
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr, end="")
+        sys.exit(1)
+    print(result.stdout, end="")
+
+    # Delete the ticket branch locally and remotely
+    run_or_die(["git", "branch", "-D", branch])
+    run_or_die(["git", "push", "origin", "--delete", branch])
+
+    print(f"\nTicket #{ticket_id} closed and branch {branch} deleted.")
+
+
+if __name__ == "__main__":
+    main()

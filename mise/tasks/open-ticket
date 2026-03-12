@@ -1,0 +1,95 @@
+#!/usr/bin/env -S uv run --script
+#MISE description "Open a ticket: generate a branch, checkout and push"
+#USAGE arg "[ticket_id]" help="Ticket ID (if omitted, pick interactively with fzf)"
+#USAGE flag "--tracker <tracker>" help="Tracker name" default="vpn-passthrough"
+
+# /// script
+# requires-python = ">=3.13"
+# ///
+
+import os
+import re
+import subprocess
+import sys
+
+
+def run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, text=True, capture_output=True, **kwargs)
+
+
+def pick_ticket_with_fzf(tracker: str) -> tuple[int, str] | None:
+    list_result = run(["hut", "todo", "ticket", "list", "-t", tracker])
+    if list_result.returncode != 0:
+        print(list_result.stderr, file=sys.stderr, end="")
+        sys.exit(1)
+
+    if not list_result.stdout.strip():
+        print("No open tickets found", file=sys.stderr)
+        sys.exit(1)
+
+    fzf_result = subprocess.run(
+        ["fzf", "--reverse"],
+        input=list_result.stdout,
+        text=True,
+        capture_output=True,
+    )
+    if fzf_result.returncode != 0:
+        sys.exit(1)
+
+    return parse_ticket_line(fzf_result.stdout.strip())
+
+
+def parse_ticket_line(line: str) -> tuple[int, str]:
+    match = re.match(r"#(\d+)\s+(.+?)\s+\(", line)
+    if not match:
+        print(f"Error: unexpected ticket format: {line}", file=sys.stderr)
+        sys.exit(1)
+    return int(match.group(1)), match.group(2)
+
+
+def fetch_ticket_subject(tracker: str, ticket_id: int) -> str:
+    result = run(["hut", "todo", "ticket", "show", "-t", tracker, str(ticket_id)])
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr, end="")
+        sys.exit(1)
+    # First line of the output is the subject
+    return result.stdout.splitlines()[0]
+
+
+def slugify(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def main():
+    tracker = os.environ.get("usage_tracker", "vpn-passthrough")
+    ticket_id_str = os.environ.get("usage_ticket_id", "")
+
+    if ticket_id_str:
+        ticket_id = int(ticket_id_str)
+        subject = fetch_ticket_subject(tracker, ticket_id)
+    else:
+        ticket_id, subject = pick_ticket_with_fzf(tracker)
+
+    branch = f"ticket/{ticket_id}-{slugify(subject)}"
+    print(f"Branch: {branch}")
+
+    # Check if branch already exists locally
+    check = run(["git", "rev-parse", "--verify", branch])
+    if check.returncode == 0:
+        run_or_die(["git", "checkout", branch])
+    else:
+        run_or_die(["git", "checkout", "-b", branch])
+
+    run_or_die(["git", "push", "-u", "origin", branch])
+
+
+def run_or_die(command: list[str]) -> None:
+    result = subprocess.run(command)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,36 @@
+#!/usr/bin/env -S uv run --script
+#MISE description "Add a ticket to the sourcehut tracker"
+#USAGE arg "<subject>" help="Ticket subject/title"
+#USAGE arg "[body]" help="Ticket description (Markdown supported)" default=""
+#USAGE flag "--tracker <tracker>" help="Tracker name" default="vpn-passthrough"
+
+# /// script
+# requires-python = ">=3.13"
+# ///
+
+from subprocess import run
+import os
+import sys
+
+
+
+def main():
+    subject = os.environ["usage_subject"]
+    body = os.environ.get("usage_body", "")
+    tracker = os.environ.get("usage_tracker", "vpn-passthrough")
+
+    stdin_text = subject + "\n"
+    if body:
+        stdin_text += f"\n{body}"
+
+    result = run(["hut", "todo", "ticket", "create", "-t", tracker], input=stdin_text, text=True, capture_output=True)
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr, end="")
+        sys.exit(result.returncode)
+
+    print(result.stderr, end="")
+    print(result.stdout, end="")
+
+
+if __name__ == "__main__":
+    main()
