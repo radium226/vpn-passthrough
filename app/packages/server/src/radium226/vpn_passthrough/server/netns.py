@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
+from loguru import logger
+
 _TUNNEL_NAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
 
 
@@ -64,4 +66,4 @@ class Namespace:
             try:
                 ns_dir.rmdir()
             except OSError:
-                pass
+                logger.warning("Failed to remove namespace directory {}", ns_dir)
