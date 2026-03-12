@@ -2,7 +2,7 @@ import asyncio
 import os
 import signal
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -205,6 +205,11 @@ class Service():
             raise ValueError("RunProcess requires in_tunnel")
         if request.username is None:
             raise ValueError("RunProcess requires username")
+
+        tunnel_name_for_setup = request.in_tunnel.name
+        if tunnel_name_for_setup not in self.namespaces:
+            logger.info("Lazily creating tunnel {} for process", tunnel_name_for_setup)
+            await self._setup_tunnel(tunnel_name_for_setup, None, None, None, 0, emit)
 
         namespace = self.namespaces[request.in_tunnel.name]
         pia_ctx = self.pia_contexts.get(request.in_tunnel.name) if port_rebind_every is not None else None
