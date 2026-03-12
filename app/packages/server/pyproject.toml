@@ -2,7 +2,7 @@
 name = "radium226-vpn-passthrough-server"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = ["loguru", "jinja2", "radium226-vpn-passthrough-messages", "radium226-vpn-passthrough-ipc", "radium226-vpn-passthrough-pia"]
+dependencies = ["loguru", "jinja2", "radium226-vpn-passthrough-messages", "radium226-vpn-passthrough-ipc", "radium226-vpn-passthrough-vpn"]
 
 [build-system]
 requires = ["uv_build>=0.10.3,<0.11.0"]
@@ -14,7 +14,7 @@ module-name = "radium226.vpn_passthrough.server"
 [tool.uv.sources]
 radium226-vpn-passthrough-messages = { workspace = true }
 radium226-vpn-passthrough-ipc = { workspace = true }
-radium226-vpn-passthrough-pia = { workspace = true }
+radium226-vpn-passthrough-vpn = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest>=9.0.2", "pytest-asyncio>=1.0.0", "ruff>=0.15.4", "ty>=0.0.19"]

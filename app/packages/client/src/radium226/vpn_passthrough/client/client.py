@@ -132,9 +132,9 @@ class Client:
         name: str,
         *,
         region_id: str | None = None,
-        username: str | None = None,
-        password: str | None = None,
+        credentials: dict[str, str] | None = None,
         number_of_ports_to_forward: int = 0,
+        backend: str | None = None,
         on_tunnel_info_changed: Callable[[TunnelInfo], None] | None = None,
     ) -> TunnelCreated:
         loop = asyncio.get_running_loop()
@@ -156,9 +156,9 @@ class Client:
                 id=str(uuid.uuid4()),
                 name=name,
                 region_id=region_id,
-                username=username,
-                password=password,
+                credentials=credentials,
                 number_of_ports_to_forward=number_of_ports_to_forward,
+                backend=backend,
             ),
             handler=ResponseHandler[ConnectedToVPN | DNSConfigured, TunnelCreated](
                 on_event=on_event,
@@ -174,9 +174,9 @@ class Client:
         name: str,
         *,
         region_id: str | None = None,
-        username: str | None = None,
-        password: str | None = None,
+        credentials: dict[str, str] | None = None,
         number_of_ports_to_forward: int = 0,
+        backend: str | None = None,
         on_ready: Callable[[], None] | None = None,
         on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None,
     ) -> None:
@@ -206,9 +206,9 @@ class Client:
                 id=str(uuid.uuid4()),
                 name=name,
                 region_id=region_id,
-                username=username,
-                password=password,
+                credentials=credentials,
                 number_of_ports_to_forward=number_of_ports_to_forward,
+                backend=backend,
             ),
             handler=ResponseHandler[TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated, TunnelStopped](
                 on_event=on_event,
@@ -219,7 +219,7 @@ class Client:
 
         await done
 
-    async def list_regions(self) -> list[Country]:
+    async def list_regions(self, *, backend: str | None = None) -> list[Country]:
         loop = asyncio.get_running_loop()
         result: asyncio.Future[list[Country]] = loop.create_future()
 
@@ -227,7 +227,7 @@ class Client:
             result.set_result(response.countries)
 
         await self.ipc.request(
-            ListRegions(id=str(uuid.uuid4())),
+            ListRegions(id=str(uuid.uuid4()), backend=backend),
             handler=ResponseHandler[Never, RegionsListed](on_response=on_response),
             fds=[],
         )

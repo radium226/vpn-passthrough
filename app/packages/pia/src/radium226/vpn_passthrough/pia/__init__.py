@@ -1,11 +1,13 @@
 import asyncio
 from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
 
 from loguru import logger
+
+from radium226.vpn_passthrough.vpn import Region, Session
 
 from ._credentials import credentials_file
 from ._gateway import allocate_forwarded_port, rebind_loop
@@ -18,7 +20,7 @@ __all__ = [
     "Password",
     "Payload",
     "PayloadAndSignature",
-    "PIA",
+    "PIABackend",
     "PIASession",
     "rebind_loop",
     "RegionID",
@@ -29,7 +31,6 @@ __all__ = [
     "Region",
 ]
 from ._openvpn import openvpn_connected
-from ._models import Region
 from ._server_list import fetch_regions, fetch_server
 
 _DEFAULT_CA_CERT_PATH = Path(__file__).parent / "ca.rsa.4096.crt"
@@ -100,25 +101,56 @@ async def connect(
                 await asyncio.gather(*rebind_tasks, return_exceptions=True)
 
 
-@dataclass(frozen=True)
-class PIA:
-    netns_name: str
-    auth: Auth
-    region_id: RegionID
-    enter_netns: Callable[[], None]
-    ca_cert_path: Path = _DEFAULT_CA_CERT_PATH
-    forwarded_port_count: int = 0
-    rebind_interval: float = 30.0
+_module_connect = connect
 
-    def connect(self) -> AbstractAsyncContextManager[PIASession]:
-        return connect(
-            self.netns_name,
-            self.auth,
-            self.region_id,
-            enter_netns=self.enter_netns,
-            ca_cert_path=self.ca_cert_path,
-            forwarded_port_count=self.forwarded_port_count,
-            rebind_interval=self.rebind_interval,
-        )
+
+def _auth_from_credentials(credentials: dict[str, str]) -> Auth:
+    return Auth(user=User(credentials["username"]), password=Password(credentials["password"]))
+
+
+class PIABackend:
+
+    @asynccontextmanager
+    async def connect(
+        self,
+        netns_name: str,
+        *,
+        enter_netns: Callable[[], None],
+        credentials: dict[str, str],
+        region_id: str,
+        forwarded_port_count: int = 0,
+    ) -> AsyncIterator[Session]:
+        auth = _auth_from_credentials(credentials)
+        async with _module_connect(
+            netns_name,
+            auth,
+            RegionID(region_id),
+            enter_netns=enter_netns,
+            forwarded_port_count=forwarded_port_count,
+        ) as session:
+            @asynccontextmanager
+            async def _forward_port() -> AsyncIterator[int]:
+                fp = await allocate_forwarded_port(session.gateway_ip, auth, enter_netns)
+                task = asyncio.create_task(rebind_loop(session.gateway_ip, fp, enter_netns))
+                try:
+                    yield fp.number
+                finally:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+
+            yield Session(
+                gateway_ip=session.gateway_ip,
+                tun_ip=session.tun_ip,
+                dns_servers=session.dns_servers,
+                forwarded_ports=tuple(fp.number for fp in session.forwarded_ports),
+                forward_port=_forward_port,
+            )
+
+    async def list_regions(self) -> list[Region]:
+        regions = await fetch_regions()
+        return [
+            Region(id=r.id, name=r.name, country=r.country, port_forward=r.port_forward)
+            for r in regions
+        ]
 
 

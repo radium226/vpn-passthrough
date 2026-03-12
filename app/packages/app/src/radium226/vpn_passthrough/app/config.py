@@ -18,8 +18,8 @@ _ONE_WEEK = 7 * 24 * 3600.0
 class Config(BaseModel):
     socket_file_path: Path = _DEFAULT_SOCKET_FILE_PATH
     namespace_base_folder_path: Path = _DEFAULT_NAMESPACE_FOLDER_PATH
-    vpn_user: str | None = None
-    vpn_password: str | None = None
+    vpn_credentials: dict[str, str] | None = None
+    vpn_backend: str | None = None
     region_id: str | None = None
     number_of_ports_to_forward: int = 0
     port_rebind_every: float = _ONE_WEEK

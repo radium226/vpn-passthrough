@@ -3,7 +3,9 @@ import json
 import httpx
 from loguru import logger
 
-from ._models import Region, RegionID
+from radium226.vpn_passthrough.vpn import Region
+
+from ._models import RegionID
 
 _SERVER_LIST_URL = "https://serverlist.piaservers.net/vpninfo/servers/v6"
 

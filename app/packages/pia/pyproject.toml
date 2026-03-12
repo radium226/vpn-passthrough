@@ -2,7 +2,7 @@
 name = "radium226-vpn-passthrough-pia"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = ["loguru", "httpx"]
+dependencies = ["loguru", "httpx", "radium226-vpn-passthrough-vpn"]
 
 [build-system]
 requires = ["uv_build>=0.10.3,<0.11.0"]
@@ -11,6 +11,12 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "radium226.vpn_passthrough.pia"
 data-files = {"radium226/vpn_passthrough/pia" = ["src/radium226/vpn_passthrough/pia/*.crt"]}
+
+[tool.uv.sources]
+radium226-vpn-passthrough-vpn = { workspace = true }
+
+[project.entry-points."vpn_passthrough.vpn_backends"]
+pia = "radium226.vpn_passthrough.pia:PIABackend"
 
 [dependency-groups]
 dev = ["pytest>=9.0.2", "pytest-asyncio>=1.0.0", "ruff>=0.15.4", "ty>=0.0.19"]

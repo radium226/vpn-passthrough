@@ -62,13 +62,20 @@ def app(ctx: click.Context, socket_file_path: Path | None, config_file_path: Pat
     ctx.obj.config = Config.load(config_file_path, skip_user_config=skip_user_config).merge_with(cli_config)
 
 
+def _parse_credential(value: str) -> tuple[str, str]:
+    if "=" not in value:
+        raise click.BadParameter(f"Credential must be in key=value format, got: {value!r}")
+    key, _, val = value.partition("=")
+    return key, val
+
+
 @asynccontextmanager
 async def _ensure_tunnel(
     client: Client,
     tunnel_name: str | None,
     region_id: str | None,
-    username: str | None,
-    password: str | None,
+    credentials: dict[str, str] | None,
+    backend: str | None,
 ) -> AsyncIterator[str]:
     """Yield a tunnel name, creating (and later destroying) a temporary one when tunnel_name is None."""
     if tunnel_name is not None:
@@ -77,12 +84,12 @@ async def _ensure_tunnel(
 
     temp_name = str(uuid.uuid4())
     resolved_region_id = region_id
-    if username is not None and password is not None and region_id is None:
-        countries = await client.list_regions()
+    if credentials is not None and region_id is None:
+        countries = await client.list_regions(backend=backend)
         chosen = random.choice(countries)
         click.echo(f"No region specified, randomly chose: {chosen.name} ({chosen.region_id})")
         resolved_region_id = chosen.region_id
-    await client.create_tunnel(temp_name, region_id=resolved_region_id, username=username, password=password)
+    await client.create_tunnel(temp_name, region_id=resolved_region_id, credentials=credentials, backend=backend)
     try:
         yield temp_name
     finally:
@@ -174,14 +181,14 @@ def start_server(config: Config) -> None:
     default=None,
     help="Run the process inside the named tunnel. If omitted, a temporary tunnel is created and destroyed on exit.",
 )
-@click.option("--region-id", default=None, envvar="VPN_PASSTHROUGH_REGION_ID", help="PIA region ID for the temporary tunnel.")
-@click.option("--vpn-user", "vpn_user", default=None, envvar="VPN_PASSTHROUGH_USERNAME", help="PIA username for the temporary tunnel (overrides config file).")
-@click.option("--vpn-password", "vpn_password", default=None, envvar="VPN_PASSTHROUGH_PASSWORD", help="PIA password for the temporary tunnel (overrides config file).")
+@click.option("--region-id", default=None, envvar="VPN_PASSTHROUGH_REGION_ID", help="VPN region ID for the temporary tunnel.")
+@click.option("--credential", "credential_items", multiple=True, help="VPN credential as key=value (repeatable, overrides config file).")
+@click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
 @click.argument("command", nargs=-1, required=True)
 @pass_config
-def run_process(config: Config, restart_every: float | None, port_rebind_every: float | None, kill_with: int | None, tunnel_name: str | None, region_id: str | None, vpn_user: str | None, vpn_password: str | None, command: tuple[str, ...]) -> None:
-    username = vpn_user or config.vpn_user
-    password = vpn_password or config.vpn_password
+def run_process(config: Config, restart_every: float | None, port_rebind_every: float | None, kill_with: int | None, tunnel_name: str | None, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, command: tuple[str, ...]) -> None:
+    credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
+    backend = vpn_backend or config.vpn_backend
     port_rebind_every = port_rebind_every if port_rebind_every is not None else config.port_rebind_every
 
     async def _run() -> None:
@@ -189,7 +196,7 @@ def run_process(config: Config, restart_every: float | None, port_rebind_every: 
         pid_future: asyncio.Future[int] = loop.create_future()
 
         async with Client.connect(config.socket_file_path) as client:
-            async with _ensure_tunnel(client, tunnel_name, region_id, username, password) as effective_tunnel_name:
+            async with _ensure_tunnel(client, tunnel_name, region_id, credentials, backend) as effective_tunnel_name:
                 async def handle_pid(pid: int) -> None:
                     if not pid_future.done():
                         pid_future.set_result(pid)
@@ -232,13 +239,13 @@ def run_process(config: Config, restart_every: float | None, port_rebind_every: 
     default=None,
     help="Run bash inside the named tunnel. If omitted, a temporary tunnel is created and destroyed on exit.",
 )
-@click.option("--region-id", default=None, envvar="VPN_PASSTHROUGH_REGION_ID", help="PIA region ID for the temporary tunnel.")
-@click.option("--vpn-user", "vpn_user", default=None, envvar="VPN_PASSTHROUGH_USERNAME", help="PIA username for the temporary tunnel (overrides config file).")
-@click.option("--vpn-password", "vpn_password", default=None, envvar="VPN_PASSTHROUGH_PASSWORD", help="PIA password for the temporary tunnel (overrides config file).")
+@click.option("--region-id", default=None, envvar="VPN_PASSTHROUGH_REGION_ID", help="VPN region ID for the temporary tunnel.")
+@click.option("--credential", "credential_items", multiple=True, help="VPN credential as key=value (repeatable, overrides config file).")
+@click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
 @pass_config
-def debug_tunnel(config: Config, tunnel_name: str | None, region_id: str | None, vpn_user: str | None, vpn_password: str | None) -> None:
-    username = vpn_user or config.vpn_user
-    password = vpn_password or config.vpn_password
+def debug_tunnel(config: Config, tunnel_name: str | None, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None) -> None:
+    credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
+    backend = vpn_backend or config.vpn_backend
 
     async def _run() -> None:
         loop = asyncio.get_running_loop()
@@ -271,7 +278,7 @@ def debug_tunnel(config: Config, tunnel_name: str | None, region_id: str | None,
         exit_code = 1
         try:
             async with Client.connect(config.socket_file_path) as client:
-                async with _ensure_tunnel(client, tunnel_name, region_id, username, password) as effective_tunnel_name:
+                async with _ensure_tunnel(client, tunnel_name, region_id, credentials, backend) as effective_tunnel_name:
                     proxy_task = asyncio.create_task(_proxy_pty(master_fd))
                     exit_code = await client.run_process(
                         "bash",
@@ -307,32 +314,32 @@ def debug_tunnel(config: Config, tunnel_name: str | None, region_id: str | None,
 
 
 @app.command("create-tunnel")
-@click.option("--region-id", default=None, envvar="VPN_PASSTHROUGH_REGION_ID", help="PIA region ID. If omitted, falls back to config file, then a random region is chosen.")
-@click.option("--vpn-user", "vpn_user", default=None, envvar="VPN_PASSTHROUGH_USERNAME", help="PIA username (overrides config file).")
-@click.option("--vpn-password", "vpn_password", default=None, envvar="VPN_PASSTHROUGH_PASSWORD", help="PIA password (overrides config file).")
+@click.option("--region-id", default=None, envvar="VPN_PASSTHROUGH_REGION_ID", help="VPN region ID. If omitted, falls back to config file, then a random region is chosen.")
+@click.option("--credential", "credential_items", multiple=True, help="VPN credential as key=value (repeatable, overrides config file).")
+@click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
 @click.option("--without-vpn", "without_vpn", is_flag=True, default=False, help="Create the tunnel without connecting to VPN.")
 @click.option("--number-of-ports-to-forward", "number_of_ports_to_forward", type=int, default=None, envvar="VPN_PASSTHROUGH_NUMBER_OF_PORTS_TO_FORWARD", help="Number of ports to forward through the VPN.")
 @click.argument("name")
 @pass_config
-def create_tunnel(config: Config, region_id: str | None, vpn_user: str | None, vpn_password: str | None, without_vpn: bool, number_of_ports_to_forward: int | None, name: str) -> None:
-    username = vpn_user or config.vpn_user
-    password = vpn_password or config.vpn_password
+def create_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, number_of_ports_to_forward: int | None, name: str) -> None:
+    credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
+    backend = vpn_backend or config.vpn_backend
     region_id = region_id or config.region_id
     number_of_ports_to_forward = number_of_ports_to_forward if number_of_ports_to_forward is not None else config.number_of_ports_to_forward
 
     async def _run() -> None:
         async with Client.connect(config.socket_file_path) as client:
             if without_vpn:
-                resolved_region_id, resolved_username, resolved_password = None, None, None
-            elif username is not None and password is not None and region_id is None:
-                countries = await client.list_regions()
+                resolved_region_id, resolved_credentials = None, None
+            elif credentials is not None and region_id is None:
+                countries = await client.list_regions(backend=backend)
                 if number_of_ports_to_forward > 0:
                     countries = [c for c in countries if c.port_forward]
                 chosen = random.choice(countries)
                 click.echo(f"No region specified, randomly chose: {chosen.name} ({chosen.region_id})")
-                resolved_region_id, resolved_username, resolved_password = chosen.region_id, username, password
+                resolved_region_id, resolved_credentials = chosen.region_id, credentials
             else:
-                resolved_region_id, resolved_username, resolved_password = region_id, username, password
+                resolved_region_id, resolved_credentials = region_id, credentials
 
             loop = asyncio.get_running_loop()
             stop: asyncio.Future[None] = loop.create_future()
@@ -346,7 +353,7 @@ def create_tunnel(config: Config, region_id: str | None, vpn_user: str | None, v
 
             created = False
             try:
-                await client.create_tunnel(name, region_id=resolved_region_id, username=resolved_username, password=resolved_password, number_of_ports_to_forward=number_of_ports_to_forward)
+                await client.create_tunnel(name, region_id=resolved_region_id, credentials=resolved_credentials, number_of_ports_to_forward=number_of_ports_to_forward, backend=backend)
                 created = True
                 await stop
             finally:
@@ -359,34 +366,34 @@ def create_tunnel(config: Config, region_id: str | None, vpn_user: str | None, v
 
 
 @app.command("start-tunnel")
-@click.option("--region-id", default=None, envvar="VPN_PASSTHROUGH_REGION_ID", help="PIA region ID. If omitted, falls back to config, then a random region is chosen.")
-@click.option("--vpn-user", "vpn_user", default=None, envvar="VPN_PASSTHROUGH_USERNAME", help="PIA username (overrides config file).")
-@click.option("--vpn-password", "vpn_password", default=None, envvar="VPN_PASSTHROUGH_PASSWORD", help="PIA password (overrides config file).")
+@click.option("--region-id", default=None, envvar="VPN_PASSTHROUGH_REGION_ID", help="VPN region ID. If omitted, falls back to config, then a random region is chosen.")
+@click.option("--credential", "credential_items", multiple=True, help="VPN credential as key=value (repeatable, overrides config file).")
+@click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
 @click.option("--without-vpn", "without_vpn", is_flag=True, default=False, help="Start the tunnel without connecting to VPN.")
 @click.option("--number-of-ports-to-forward", "number_of_ports_to_forward", type=int, default=None, envvar="VPN_PASSTHROUGH_NUMBER_OF_PORTS_TO_FORWARD", help="Number of ports to forward through the VPN.")
 @click.option("--persistent", "persistent", is_flag=True, default=False, help=f"Write the resolved tunnel config to {TUNNEL_CONFIGS_DIR}/<name>.yaml so future invocations reuse it.")
 @click.argument("name")
 @pass_config
-def start_tunnel(config: Config, region_id: str | None, vpn_user: str | None, vpn_password: str | None, without_vpn: bool, number_of_ports_to_forward: int | None, persistent: bool, name: str) -> None:
+def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, number_of_ports_to_forward: int | None, persistent: bool, name: str) -> None:
     config = config.merge_with(Config._from_file(TUNNEL_CONFIGS_DIR / f"{name}.yaml"))
-    username = vpn_user or config.vpn_user
-    password = vpn_password or config.vpn_password
+    credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
+    backend = vpn_backend or config.vpn_backend
     region_id = region_id or config.region_id
     number_of_ports_to_forward = number_of_ports_to_forward if number_of_ports_to_forward is not None else config.number_of_ports_to_forward
 
     async def _run() -> None:
         async with Client.connect(config.socket_file_path) as client:
             if without_vpn:
-                resolved_region_id, resolved_username, resolved_password = None, None, None
-            elif username is not None and password is not None and region_id is None:
-                countries = await client.list_regions()
+                resolved_region_id, resolved_credentials = None, None
+            elif credentials is not None and region_id is None:
+                countries = await client.list_regions(backend=backend)
                 if number_of_ports_to_forward > 0:
                     countries = [c for c in countries if c.port_forward]
                 chosen = random.choice(countries)
                 click.echo(f"No region specified, randomly chose: {chosen.name} ({chosen.region_id})")
-                resolved_region_id, resolved_username, resolved_password = chosen.region_id, username, password
+                resolved_region_id, resolved_credentials = chosen.region_id, credentials
             else:
-                resolved_region_id, resolved_username, resolved_password = region_id, username, password
+                resolved_region_id, resolved_credentials = region_id, credentials
 
             if persistent:
                 tunnel_config_path = TUNNEL_CONFIGS_DIR / f"{name}.yaml"
@@ -396,10 +403,10 @@ def start_tunnel(config: Config, region_id: str | None, vpn_user: str | None, vp
                 data: dict = {}
                 if resolved_region_id is not None:
                     data["region_id"] = resolved_region_id
-                if resolved_username is not None:
-                    data["vpn_user"] = resolved_username
-                if resolved_password is not None:
-                    data["vpn_password"] = resolved_password
+                if resolved_credentials is not None:
+                    data["vpn_credentials"] = resolved_credentials
+                if backend is not None:
+                    data["vpn_backend"] = backend
                 if number_of_ports_to_forward:
                     data["number_of_ports_to_forward"] = number_of_ports_to_forward
                 with tunnel_config_path.open("w") as f:
@@ -431,9 +438,9 @@ def start_tunnel(config: Config, region_id: str | None, vpn_user: str | None, vp
                 await client.start_tunnel(
                     name,
                     region_id=resolved_region_id,
-                    username=resolved_username,
-                    password=resolved_password,
+                    credentials=resolved_credentials,
                     number_of_ports_to_forward=number_of_ports_to_forward,
+                    backend=backend,
                     on_ready=on_ready,
                     on_tunnel_status_updated=on_tunnel_status_updated,
                 )
@@ -452,11 +459,13 @@ def start_tunnel(config: Config, region_id: str | None, vpn_user: str | None, vp
     default="table",
     help="Output format.",
 )
+@click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
 @pass_config
-def list_regions(config: Config, output_format: str) -> None:
+def list_regions(config: Config, output_format: str, vpn_backend: str | None) -> None:
+    backend = vpn_backend or config.vpn_backend
     async def _run() -> None:
         async with Client.connect(config.socket_file_path) as client:
-            countries = await client.list_regions()
+            countries = await client.list_regions(backend=backend)
 
             if output_format == "json":
                 click.echo(json.dumps(
@@ -529,6 +538,13 @@ def list_tunnels(config: Config, output_format: str, with_processes: bool) -> No
                 click.echo(table)
 
     asyncio.run(_run())
+
+
+@app.command("list-backends")
+def list_backends_cmd() -> None:
+    from radium226.vpn_passthrough.vpn import list_backends
+    for name in list_backends():
+        click.echo(name)
 
 
 @app.command("show-config")

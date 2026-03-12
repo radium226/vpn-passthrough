@@ -10,6 +10,7 @@ members = [
     "radium226-vpn-passthrough-messages",
     "radium226-vpn-passthrough-pia",
     "radium226-vpn-passthrough-server",
+    "radium226-vpn-passthrough-vpn",
 ]
 
 [[package]]
@@ -329,7 +330,9 @@ dependencies = [
     { name = "prettytable" },
     { name = "pyyaml" },
     { name = "radium226-vpn-passthrough-client" },
+    { name = "radium226-vpn-passthrough-pia" },
     { name = "radium226-vpn-passthrough-server" },
+    { name = "radium226-vpn-passthrough-vpn" },
 ]
 
 [package.dev-dependencies]
@@ -346,7 +349,9 @@ requires-dist = [
     { name = "prettytable" },
     { name = "pyyaml" },
     { name = "radium226-vpn-passthrough-client", editable = "packages/client" },
+    { name = "radium226-vpn-passthrough-pia", editable = "packages/pia" },
     { name = "radium226-vpn-passthrough-server", editable = "packages/server" },
+    { name = "radium226-vpn-passthrough-vpn", editable = "packages/vpn" },
 ]
 
 [package.metadata.requires-dev]
@@ -459,6 +464,7 @@ source = { editable = "packages/pia" }
 dependencies = [
     { name = "httpx" },
     { name = "loguru" },
+    { name = "radium226-vpn-passthrough-vpn" },
 ]
 
 [package.dev-dependencies]
@@ -473,6 +479,7 @@ dev = [
 requires-dist = [
     { name = "httpx" },
     { name = "loguru" },
+    { name = "radium226-vpn-passthrough-vpn", editable = "packages/vpn" },
 ]
 
 [package.metadata.requires-dev]
@@ -492,7 +499,7 @@ dependencies = [
     { name = "loguru" },
     { name = "radium226-vpn-passthrough-ipc" },
     { name = "radium226-vpn-passthrough-messages" },
-    { name = "radium226-vpn-passthrough-pia" },
+    { name = "radium226-vpn-passthrough-vpn" },
 ]
 
 [package.dev-dependencies]
@@ -509,13 +516,32 @@ requires-dist = [
     { name = "loguru" },
     { name = "radium226-vpn-passthrough-ipc", editable = "packages/ipc" },
     { name = "radium226-vpn-passthrough-messages", editable = "packages/messages" },
-    { name = "radium226-vpn-passthrough-pia", editable = "packages/pia" },
+    { name = "radium226-vpn-passthrough-vpn", editable = "packages/vpn" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=1.0.0" },
+    { name = "ruff", specifier = ">=0.15.4" },
+    { name = "ty", specifier = ">=0.0.19" },
+]
+
+[[package]]
+name = "radium226-vpn-passthrough-vpn"
+version = "0.1.0"
+source = { editable = "packages/vpn" }
+
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+    { name = "ty" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
     { name = "ruff", specifier = ">=0.15.4" },
     { name = "ty", specifier = ">=0.0.19" },
 ]

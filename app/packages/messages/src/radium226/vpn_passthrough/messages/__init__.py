@@ -96,9 +96,9 @@ class CreateTunnel(BaseModel, Request[TunnelCreated, ConnectedToVPN | DNSConfigu
     id: str
     name: str
     region_id: str | None = None
-    username: str | None = None
-    password: str | None = None
+    credentials: dict[str, str] | None = None
     number_of_ports_to_forward: int = 0
+    backend: str | None = None
     type: Literal["create_tunnel"] = "create_tunnel"
 
 
@@ -122,9 +122,9 @@ class StartTunnel(BaseModel, Request["TunnelStopped", "TunnelStarted | Connected
     id: str
     name: str
     region_id: str | None = None
-    username: str | None = None
-    password: str | None = None
+    credentials: dict[str, str] | None = None
     number_of_ports_to_forward: int = 0
+    backend: str | None = None
     type: Literal["start_tunnel"] = "start_tunnel"
 
 
@@ -149,6 +149,7 @@ class RegionsListed(BaseModel):
 
 class ListRegions(BaseModel, Request[RegionsListed, Never]):
     id: str
+    backend: str | None = None
     type: Literal["list_regions"] = "list_regions"
 
 

@@ -21,14 +21,6 @@ class PayloadAndSignature:
 
 
 @dataclass(frozen=True)
-class Region:
-    id: RegionID
-    name: str
-    country: str
-    port_forward: bool = False
-
-
-@dataclass(frozen=True)
 class ForwardedPort:
     number: int
     payload_and_signature: PayloadAndSignature

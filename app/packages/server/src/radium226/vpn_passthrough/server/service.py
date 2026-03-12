@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from typing import Never
 
 from jinja2 import Template, TemplateError
@@ -41,7 +41,7 @@ from radium226.vpn_passthrough.messages import (
     TunnelStopped,
     TunnelsListed,
 )
-from radium226.vpn_passthrough.pia import Auth, Password, RegionID, User, allocate_forwarded_port, rebind_loop, connect as pia_connect, fetch_regions
+from radium226.vpn_passthrough.vpn import get_backend
 from .dns import DNS
 from .dns_leak_guard import DnsLeakGuard
 from .internet import Internet
@@ -59,13 +59,7 @@ class _TunnelContext:
     tun_ip: str
     forwarded_ports: list[int]
     region_id: str | None = None
-
-
-@dataclass
-class _PIAContext:
-    gateway_ip: str
-    auth: Auth
-    extra_rebind_tasks: list[asyncio.Task[None]]
+    forward_port: Callable[[], AbstractAsyncContextManager[int]] | None = None
 
 
 class Service():
@@ -80,7 +74,6 @@ class Service():
         self.exit_stacks: dict[TunnelName, AsyncExitStack] = {}
         self.namespaces: dict[TunnelName, Namespace] = {}
         self.tunnel_contexts: dict[TunnelName, _TunnelContext] = {}
-        self.pia_contexts: dict[TunnelName, _PIAContext] = {}
         self.processes: dict[TunnelName, dict[int, ProcessInfo]] = {}
         self._on_tunnels_changed = on_tunnels_changed
         self._tunnel_stop_signals: dict[TunnelName, asyncio.Future[None]] = {}
@@ -126,10 +119,10 @@ class Service():
         self,
         name: TunnelName,
         region_id: str | None,
-        username: str | None,
-        password: str | None,
+        credentials: dict[str, str] | None,
         number_of_ports_to_forward: int,
         emit: Any,
+        backend: str | None = None,
     ) -> None:
         stack = AsyncExitStack()
         try:
@@ -137,12 +130,14 @@ class Service():
             ni = await stack.enter_async_context(NetworkInterfaces.add(netns))
             await stack.enter_async_context(Internet.share(name, ni))
 
-            if region_id is not None and username is not None and password is not None:
-                auth = Auth(user=User(username), password=Password(password))
+            if region_id is not None and credentials is not None:
+                backend_instance = get_backend(backend or "pia")
                 session = await stack.enter_async_context(
-                    pia_connect(
-                        name, auth, RegionID(region_id),
+                    backend_instance.connect(
+                        name,
                         enter_netns=netns.enter,
+                        credentials=credentials,
+                        region_id=region_id,
                         forwarded_port_count=number_of_ports_to_forward,
                     )
                 )
@@ -151,7 +146,7 @@ class Service():
                 await emit(DNSConfigured(nameservers=nameservers), [])
                 await stack.enter_async_context(DNS.setup(netns, nameservers=nameservers))
                 await stack.enter_async_context(DnsLeakGuard.activate(netns, ni))
-                forwarded_ports = [fp.number for fp in session.forwarded_ports]
+                forwarded_ports = list(session.forwarded_ports)
                 remote_ip = await self._fetch_remote_ip(netns)
                 logger.info("Connected to VPN in tunnel {} (gateway={}, remote_ip={})", name, session.gateway_ip, remote_ip)
                 await emit(ConnectedToVPN(remote_ip=remote_ip, gateway_ip=session.gateway_ip, tun_ip=session.tun_ip, forwarded_ports=forwarded_ports), [])
@@ -161,11 +156,7 @@ class Service():
                     tun_ip=session.tun_ip,
                     forwarded_ports=forwarded_ports,
                     region_id=region_id,
-                )
-                self.pia_contexts[name] = _PIAContext(
-                    gateway_ip=session.gateway_ip,
-                    auth=auth,
-                    extra_rebind_tasks=[],
+                    forward_port=session.forward_port,
                 )
             else:
                 await stack.enter_async_context(DNS.setup(netns, nameservers=None))
@@ -174,7 +165,6 @@ class Service():
             self.exit_stacks[name] = stack
         except BaseException:
             self.tunnel_contexts.pop(name, None)
-            self.pia_contexts.pop(name, None)
             await stack.aclose()
             raise
 
@@ -209,10 +199,10 @@ class Service():
         tunnel_name_for_setup = request.in_tunnel.name
         if tunnel_name_for_setup not in self.namespaces:
             logger.info("Lazily creating tunnel {} for process", tunnel_name_for_setup)
-            await self._setup_tunnel(tunnel_name_for_setup, None, None, None, 0, emit)
+            await self._setup_tunnel(tunnel_name_for_setup, None, None, 0, emit)
 
         namespace = self.namespaces[request.in_tunnel.name]
-        pia_ctx = self.pia_contexts.get(request.in_tunnel.name) if port_rebind_every is not None else None
+        tunnel_ctx_for_rebind = self.tunnel_contexts.get(request.in_tunnel.name) if port_rebind_every is not None else None
 
         preexec_fn = make_preexec_fn(
             request.username,
@@ -278,7 +268,7 @@ class Service():
             timer_tasks: dict[str, asyncio.Task[None]] = {}
             if restart_every is not None:
                 timer_tasks["restart"] = asyncio.create_task(asyncio.sleep(restart_every))
-            if port_rebind_every is not None and pia_ctx is not None:
+            if port_rebind_every is not None and tunnel_ctx_for_rebind is not None and tunnel_ctx_for_rebind.forward_port is not None:
                 timer_tasks["rebind"] = asyncio.create_task(asyncio.sleep(port_rebind_every))
 
             if timer_tasks:
@@ -294,14 +284,12 @@ class Service():
                 restart_timer = timer_tasks.get("restart")
 
                 if rebind_timer is not None and rebind_timer in done:
-                    if pia_ctx is None:
-                        raise RuntimeError("rebind timer fired but pia_ctx is None")
-                    new_port = await allocate_forwarded_port(pia_ctx.gateway_ip, pia_ctx.auth, namespace.enter)
-                    new_rebind_task: asyncio.Task[None] = asyncio.create_task(
-                        rebind_loop(pia_ctx.gateway_ip, new_port, namespace.enter)
+                    if tunnel_ctx_for_rebind is None or tunnel_ctx_for_rebind.forward_port is None:
+                        raise RuntimeError("rebind timer fired but no forward_port available")
+                    new_port_number = await self.exit_stacks[tunnel_name].enter_async_context(
+                        tunnel_ctx_for_rebind.forward_port()
                     )
-                    pia_ctx.extra_rebind_tasks.append(new_rebind_task)
-                    next_forwarded_ports = [new_port.number]
+                    next_forwarded_ports = [new_port_number]
                     if ctx is not None:
                         self.tunnel_contexts[tunnel_name] = _TunnelContext(
                             public_ip=ctx.public_ip,
@@ -375,7 +363,7 @@ class Service():
         fds: list[int],
         emit: Emit[ConnectedToVPN | DNSConfigured],
     ) -> tuple[TunnelCreated, list[int]]:
-        await self._setup_tunnel(request.name, request.region_id, request.username, request.password, request.number_of_ports_to_forward, emit)
+        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.number_of_ports_to_forward, emit, backend=request.backend)
         logger.info("Tunnel {} created", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
@@ -387,7 +375,7 @@ class Service():
         fds: list[int],
         emit: Emit[TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated],
     ) -> tuple[TunnelStopped, list[int]]:
-        await self._setup_tunnel(request.name, request.region_id, request.username, request.password, request.number_of_ports_to_forward, emit)
+        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.number_of_ports_to_forward, emit, backend=request.backend)
         logger.info("Tunnel {} started", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
@@ -413,11 +401,6 @@ class Service():
         self.namespaces.pop(request.name, None)
         self.tunnel_contexts.pop(request.name, None)
         self.processes.pop(request.name, None)
-        pia_ctx = self.pia_contexts.pop(request.name, None)
-        if pia_ctx is not None:
-            for task in pia_ctx.extra_rebind_tasks:
-                task.cancel()
-            await asyncio.gather(*pia_ctx.extra_rebind_tasks, return_exceptions=True)
 
         # Unblock handle_start_tunnel (and thus the client) before the slow
         # stack teardown so the client sees the stop immediately.
@@ -441,7 +424,8 @@ class Service():
         fds: list[int],
         emit: Emit[Never],
     ) -> tuple[RegionsListed, list[int]]:
-        regions = await fetch_regions()
+        backend_instance = get_backend(request.backend or "pia")
+        regions = await backend_instance.list_regions()
         countries = [
             Country(region_id=region.id, name=region.name, country=region.country, port_forward=region.port_forward)
             for region in regions
