@@ -1,0 +1,27 @@
+[project]
+name = "radium226-vpn-passthrough-dummy"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = ["radium226-vpn-passthrough-vpn"]
+
+[build-system]
+requires = ["uv_build>=0.10.3,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "radium226.vpn_passthrough.dummy"
+
+[tool.uv.sources]
+radium226-vpn-passthrough-vpn = { workspace = true }
+
+[project.entry-points."vpn_passthrough.vpn_backends"]
+dummy = "radium226.vpn_passthrough.dummy:DummyBackend"
+
+[dependency-groups]
+dev = ["ruff>=0.15.4", "ty>=0.0.19"]
+
+[tool.ruff]
+src = ["src"]
+
+[tool.ty.src]
+include = ["src"]

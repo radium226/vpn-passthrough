@@ -33,7 +33,7 @@ class ProcessStarted(BaseModel):
 
 class ProcessRestarted(BaseModel):
     pid: int
-    forwarded_ports: list[int] = []
+    forwarded_ports: dict[str, int] = {}
     type: Literal["process_restarted"] = "process_restarted"
 
 
@@ -41,8 +41,6 @@ class RunProcess(BaseModel, Request[ProcessTerminated | CommandNotFound, Process
     id: str
     command: str
     args: list[str] = []
-    restart_every: float | None = None
-    port_rebind_every: float | None = None
     kill_with: int | None = None
     in_tunnel: Tunnel | None = None
     cwd: str | None = None
@@ -83,7 +81,7 @@ class ConnectedToVPN(BaseModel):
     remote_ip: str
     gateway_ip: str
     tun_ip: str
-    forwarded_ports: list[int]
+    forwarded_ports: dict[str, int]
     type: Literal["connected_to_vpn"] = "connected_to_vpn"
 
 
@@ -97,9 +95,17 @@ class CreateTunnel(BaseModel, Request[TunnelCreated, ConnectedToVPN | DNSConfigu
     name: str
     region_id: str | None = None
     credentials: dict[str, str] | None = None
-    number_of_ports_to_forward: int = 0
+    names_of_ports_to_forward: list[str] = []
     backend: str | None = None
     type: Literal["create_tunnel"] = "create_tunnel"
+
+
+class ConfigUsed(BaseModel):
+    region_id: str | None
+    backend: str | None
+    names_of_ports_to_forward: list[str]
+    credentials: dict[str, str] | None
+    type: Literal["config_used"] = "config_used"
 
 
 class TunnelStarted(BaseModel):
@@ -112,19 +118,25 @@ class TunnelStatusUpdated(BaseModel):
     type: Literal["tunnel_status_updated"] = "tunnel_status_updated"
 
 
+class PortsRebound(BaseModel):
+    forwarded_ports: dict[str, int]
+    type: Literal["ports_rebound"] = "ports_rebound"
+
+
 class TunnelStopped(BaseModel):
     request_id: str
     name: str
     type: Literal["tunnel_stopped"] = "tunnel_stopped"
 
 
-class StartTunnel(BaseModel, Request["TunnelStopped", "TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated"]):
+class StartTunnel(BaseModel, Request["TunnelStopped", "ConfigUsed | TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated | PortsRebound"]):
     id: str
     name: str
     region_id: str | None = None
     credentials: dict[str, str] | None = None
-    number_of_ports_to_forward: int = 0
+    names_of_ports_to_forward: list[str] = []
     backend: str | None = None
+    rebind_ports_every: float | None = None
     type: Literal["start_tunnel"] = "start_tunnel"
 
 
@@ -166,7 +178,7 @@ class TunnelInfo(BaseModel):
     public_ip: str | None = None
     gateway_ip: str | None = None
     tun_ip: str | None = None
-    forwarded_ports: list[int] = []
+    forwarded_ports: dict[str, int] = {}
     processes: list[ProcessInfo] = []
 
 
@@ -182,11 +194,11 @@ class ListTunnels(BaseModel, Request[TunnelsListed, Never]):
 
 
 type _Response = Annotated[ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed, Discriminator("type")]
-type _Event = ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | TunnelStarted | TunnelStatusUpdated
+type _Event = ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | ConfigUsed | TunnelStarted | TunnelStatusUpdated | PortsRebound
 
 _TYPE_ADAPTER = TypeAdapter(
     Annotated[
-        RunProcess | KillProcess | CreateTunnel | StartTunnel | DestroyTunnel | ListRegions | ListTunnels | ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | TunnelStarted | TunnelStatusUpdated | ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed,
+        RunProcess | KillProcess | CreateTunnel | StartTunnel | DestroyTunnel | ListRegions | ListTunnels | ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | ConfigUsed | TunnelStarted | TunnelStatusUpdated | PortsRebound | ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed,
         Discriminator("type"),
     ]
 )
@@ -200,7 +212,7 @@ def _decode(data: bytes) -> RunProcess | KillProcess | CreateTunnel | StartTunne
     return _TYPE_ADAPTER.validate_json(data.decode())
 
 
-CODEC = Codec[RunProcess | KillProcess | CreateTunnel | StartTunnel | DestroyTunnel | ListRegions | ListTunnels, ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | TunnelStarted | TunnelStatusUpdated, ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed](
+CODEC = Codec[RunProcess | KillProcess | CreateTunnel | StartTunnel | DestroyTunnel | ListRegions | ListTunnels, ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | ConfigUsed | TunnelStarted | TunnelStatusUpdated | PortsRebound, ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed](
     encode=_encode,
     decode=_decode,
 )

@@ -5,18 +5,18 @@ from typing import AsyncIterator
 from loguru import logger
 
 from ._run import run
-from .netns import Namespace
+from .namespace import Namespace
 from .network_interfaces import NetworkInterfaces
 
 
 NETNS_TABLE_NAME = "dns_leak_guard"
 
 
-class DnsLeakGuard:
+class DNSLeakGuard:
 
     @staticmethod
     @asynccontextmanager
-    async def activate(netns: Namespace, ni: NetworkInterfaces) -> AsyncIterator[None]:
+    async def activate(namespace: Namespace, ni: NetworkInterfaces) -> AsyncIterator[None]:
         # Host-side table: block DNS forwarding from the veth interface.
         # This is reliable because it runs on the host with full CAP_NET_ADMIN.
         host_table_name = f"dns_leak_guard_{ni.veth}"
@@ -56,11 +56,11 @@ class DnsLeakGuard:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            preexec_fn=netns.enter,
+            preexec_fn=namespace.enter,
         )
         stdout, stderr = await netns_process.communicate(input=netns_ruleset.encode())
         if netns_process.returncode != 0:
-            logger.warning(f"Failed to install netns-internal dns_leak_guard rules (exit code {netns_process.returncode}): {stderr.decode().strip()}")
+            logger.warning(f"Failed to install namespace-internal dns_leak_guard rules (exit code {netns_process.returncode}): {stderr.decode().strip()}")
         else:
             netns_installed = True
 
@@ -68,5 +68,5 @@ class DnsLeakGuard:
             yield
         finally:
             if netns_installed:
-                await run(["nft", "delete", "table", "inet", NETNS_TABLE_NAME], preexec_fn=netns.enter)
+                await run(["nft", "delete", "table", "inet", NETNS_TABLE_NAME], preexec_fn=namespace.enter)
             await run(["nft", "delete", "table", "inet", host_table_name])

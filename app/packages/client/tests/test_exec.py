@@ -29,8 +29,8 @@ def socket_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def service_handlers() -> list[RequestHandler]:
-    service = Service()
+def service_handlers(tmp_path: Path) -> list[RequestHandler]:
+    service = Service(tmp_path)
     return [
         RequestHandler(request_type=RunProcess, on_request=service.handle_run_process),
         RequestHandler(request_type=KillProcess, on_request=service.handle_kill_process),

@@ -7,8 +7,20 @@ main()
     local root
     root="$(git rev-parse --show-toplevel)"
 
-    log "Installing Arch Linux package with pacman..."
-    find "${root}/packages/arch" -mindepth 1 -maxdepth 1 -type "f" -name "*.pkg.tar.zst" -exec sudo pacman -U --noconfirm "{}" \;
+    # Collect all built packages into an array so they are installed in a
+    # single pacman invocation.  This is required for split packages: pacman
+    # must see all local sub-packages at once to satisfy intra-package
+    # dependencies (e.g. vpn-passthrough-pia → vpn-passthrough-cli).
+    local -a pkgs
+    mapfile -t pkgs < <(find "${root}/packages/arch" -mindepth 1 -maxdepth 1 -type f -name "*.pkg.tar.zst" | sort)
+
+    if [[ ${#pkgs[@]} -eq 0 ]]; then
+        log "No packages found in ${root}/packages/arch — run package-for-arch-linux first."
+        exit 1
+    fi
+
+    log "Installing Arch Linux packages with pacman..."
+    sudo pacman -U --noconfirm "${pkgs[@]}"
 }
 
 log() {

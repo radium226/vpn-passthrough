@@ -14,6 +14,7 @@ from radium226.vpn_passthrough.ipc.protocol import ResponseHandler
 from radium226.vpn_passthrough.messages import (
     CODEC,
     CommandNotFound,
+    ConfigUsed,
     ConnectedToVPN,
     DNSConfigured,
     RegionsListed,
@@ -23,6 +24,7 @@ from radium226.vpn_passthrough.messages import (
     KillProcess,
     ListRegions,
     ListTunnels,
+    PortsRebound,
     ProcessKilled,
     ProcessRestarted,
     ProcessStarted,
@@ -58,8 +60,6 @@ class Client:
         args: list[str] | None = None,
         *,
         fds: list[int] | None = None,
-        restart_every: float | None = None,
-        port_rebind_every: float | None = None,
         kill_with: int | None = None,
         in_tunnel: Tunnel | None = None,
         cwd: str | None = None,
@@ -93,8 +93,6 @@ class Client:
                 id=str(uuid.uuid4()),
                 command=command,
                 args=args or [],
-                restart_every=restart_every,
-                port_rebind_every=port_rebind_every,
                 kill_with=kill_with,
                 in_tunnel=in_tunnel,
                 cwd=cwd,
@@ -133,7 +131,7 @@ class Client:
         *,
         region_id: str | None = None,
         credentials: dict[str, str] | None = None,
-        number_of_ports_to_forward: int = 0,
+        names_of_ports_to_forward: list[str] | None = None,
         backend: str | None = None,
         on_tunnel_info_changed: Callable[[TunnelInfo], None] | None = None,
     ) -> TunnelCreated:
@@ -157,7 +155,7 @@ class Client:
                 name=name,
                 region_id=region_id,
                 credentials=credentials,
-                number_of_ports_to_forward=number_of_ports_to_forward,
+                names_of_ports_to_forward=names_of_ports_to_forward or [],
                 backend=backend,
             ),
             handler=ResponseHandler[ConnectedToVPN | DNSConfigured, TunnelCreated](
@@ -175,16 +173,22 @@ class Client:
         *,
         region_id: str | None = None,
         credentials: dict[str, str] | None = None,
-        number_of_ports_to_forward: int = 0,
+        names_of_ports_to_forward: list[str] | None = None,
         backend: str | None = None,
+        rebind_ports_every: float | None = None,
         on_ready: Callable[[], None] | None = None,
+        on_config_used: Callable[[ConfigUsed], None] | None = None,
         on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None,
+        on_ports_rebound: Callable[[PortsRebound], None] | None = None,
     ) -> None:
         loop = asyncio.get_running_loop()
         done: asyncio.Future[None] = loop.create_future()
 
-        async def on_event(event: TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated, fds: list[int]) -> None:
+        async def on_event(event: ConfigUsed | TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated | PortsRebound, fds: list[int]) -> None:
             match event:
+                case ConfigUsed():
+                    if on_config_used is not None:
+                        on_config_used(event)
                 case TunnelStarted():
                     logger.info("Tunnel {} started", name)
                     if on_ready is not None:
@@ -196,6 +200,10 @@ class Client:
                     logger.info("DNS configured (nameservers={})", nameservers)
                 case ConnectedToVPN(remote_ip=remote_ip, gateway_ip=gateway_ip, tun_ip=tun_ip, forwarded_ports=forwarded_ports):
                     logger.info("Connected to VPN (remote_ip={}, gateway={}, tun_ip={}, forwarded_ports={})", remote_ip, gateway_ip, tun_ip, forwarded_ports)
+                case PortsRebound(forwarded_ports=forwarded_ports):
+                    logger.info("Ports rebound (forwarded_ports={})", forwarded_ports)
+                    if on_ports_rebound is not None:
+                        on_ports_rebound(event)
 
         async def on_response(response: TunnelStopped, fds: list[int]) -> None:
             logger.info("Tunnel {} stopped", response.name)
@@ -207,10 +215,11 @@ class Client:
                 name=name,
                 region_id=region_id,
                 credentials=credentials,
-                number_of_ports_to_forward=number_of_ports_to_forward,
+                names_of_ports_to_forward=names_of_ports_to_forward or [],
                 backend=backend,
+                rebind_ports_every=rebind_ports_every,
             ),
-            handler=ResponseHandler[TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated, TunnelStopped](
+            handler=ResponseHandler[ConfigUsed | TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated | PortsRebound, TunnelStopped](
                 on_event=on_event,
                 on_response=on_response,
             ),

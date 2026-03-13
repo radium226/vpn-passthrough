@@ -1,20 +1,20 @@
 import asyncio
-from collections.abc import Callable
+import base64
+import json
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator
 
+import httpx
 from loguru import logger
 
-from radium226.vpn_passthrough.vpn import Region, Session
+from radium226.vpn_passthrough.vpn import Region, Session, EnterNamespace
 
 from ._credentials import credentials_file
-from ._gateway import allocate_forwarded_port, rebind_loop
-from ._models import Auth, ForwardedPort, Password, Payload, PayloadAndSignature, RegionID, Signature, User
+from ._models import Auth, ForwardedPort, Password, Payload, PayloadAndSignature, Signature, User
+from ._run import run
 
 __all__ = [
-    "allocate_forwarded_port",
     "Auth",
     "ForwardedPort",
     "Password",
@@ -22,86 +22,16 @@ __all__ = [
     "PayloadAndSignature",
     "PIABackend",
     "PIASession",
-    "rebind_loop",
-    "RegionID",
     "Signature",
     "User",
     "connect",
     "fetch_regions",
     "Region",
 ]
-from ._openvpn import openvpn_connected
-from ._server_list import fetch_regions, fetch_server
+from ._openvpn import OpenVPN
 
 _DEFAULT_CA_CERT_PATH = Path(__file__).parent / "ca.rsa.4096.crt"
-
-
-@dataclass(frozen=True)
-class PIASession:
-    gateway_ip: str
-    tun_ip: str
-    dns_servers: tuple[str, ...]
-    forwarded_ports: tuple[ForwardedPort, ...]
-
-
-@asynccontextmanager
-async def connect(
-    netns_name: str,
-    auth: Auth,
-    region_id: RegionID,
-    *,
-    enter_netns: Callable[[], None],
-    ca_cert_path: Path = _DEFAULT_CA_CERT_PATH,
-    forwarded_port_count: int = 0,
-    rebind_interval: float = 30.0,
-) -> AsyncIterator[PIASession]:
-    """Connect the namespace to PIA VPN and yield a :class:`PIASession`.
-
-    Steps:
-    1. Fetch the PIA server list and pick a server for *region_id*.
-    2. Write a temporary credentials file.
-    3. Start OpenVPN inside the namespace and wait for it to connect.
-    4. Allocate *forwarded_port_count* ports and start background rebind tasks.
-    5. Yield the session; tear everything down on exit.
-    """
-    server_ip, server_port = await fetch_server(region_id)
-    logger.info("Connecting to PIA region {} via {}:{}", region_id, server_ip, server_port)
-
-    async with credentials_file(auth) as creds_path:
-        async with openvpn_connected(
-            netns_name,
-            server_ip,
-            server_port,
-            creds_path,
-            enter_netns=enter_netns,
-            ca_cert_path=ca_cert_path,
-        ) as (gateway_ip, tun_ip, dns_servers):
-            forwarded_ports: list[ForwardedPort] = []
-            for _ in range(forwarded_port_count):
-                port = await allocate_forwarded_port(gateway_ip, auth, enter_netns)
-                forwarded_ports.append(port)
-
-            rebind_tasks = [
-                asyncio.create_task(
-                    rebind_loop(gateway_ip, port, enter_netns, rebind_interval)
-                )
-                for port in forwarded_ports
-            ]
-
-            try:
-                yield PIASession(
-                    gateway_ip=gateway_ip,
-                    tun_ip=tun_ip,
-                    dns_servers=tuple(dns_servers),
-                    forwarded_ports=tuple(forwarded_ports),
-                )
-            finally:
-                for task in rebind_tasks:
-                    task.cancel()
-                await asyncio.gather(*rebind_tasks, return_exceptions=True)
-
-
-_module_connect = connect
+_SERVER_LIST_URL = "https://serverlist.piaservers.net/vpninfo/servers/v6"
 
 
 def _auth_from_credentials(credentials: dict[str, str]) -> Auth:
@@ -110,47 +40,171 @@ def _auth_from_credentials(credentials: dict[str, str]) -> Auth:
 
 class PIABackend:
 
+    _REBIND_INTERVAL = 30.0
+
+    @staticmethod
+    async def _fetch_regions() -> list[Region]:
+        async with httpx.AsyncClient() as http:
+            response = await http.get(_SERVER_LIST_URL, timeout=10.0)
+            response.raise_for_status()
+        data = json.loads(response.text.split("\n", 1)[0])
+        return [
+            Region(
+                id=region["id"],
+                name=region["name"],
+                country=region["country"],
+                port_forward=region.get("port_forward", False),
+            )
+            for region in data.get("regions", [])
+        ]
+
+    @staticmethod
+    async def _fetch_server(region_id: str) -> tuple[str, int]:
+        async with httpx.AsyncClient() as http:
+            response = await http.get(_SERVER_LIST_URL, timeout=10.0)
+            response.raise_for_status()
+        data = json.loads(response.text.split("\n", 1)[0])
+        ports: list[int] = data.get("groups", {}).get("ovpnudp", [{}])[0].get("ports", [1198])
+        for region in data.get("regions", []):
+            if region["id"] == region_id:
+                servers = region["servers"].get("ovpnudp", [])
+                if not servers:
+                    raise ValueError(f"No OpenVPN UDP servers for region {region_id!r}")
+                ip: str = servers[0]["ip"]
+                port: int = ports[0]
+                logger.debug("PIA server for region {}: {}:{}", region_id, ip, port)
+                return ip, port
+        raise ValueError(f"Region {region_id!r} not found in PIA server list")
+
+    async def _get_auth_token(self, auth: Auth) -> str:
+        async with httpx.AsyncClient() as http:
+            response = await http.post(
+                "https://privateinternetaccess.com/api/client/v2/token",
+                data={"username": auth.user, "password": auth.password},
+                timeout=10.0,
+            )
+            response.raise_for_status()
+        return response.json()["token"]
+
+    async def _get_port_signature(
+        self,
+        gateway_ip: str, 
+        token: 
+        str, 
+        enter_namespace: EnterNamespace,
+    ) -> PayloadAndSignature:
+        # The gateway is only reachable from inside the netns and uses a self-signed
+        # certificate, so we reach it via curl run inside the namespace.
+        _, stdout = await run(
+            [
+                "curl", "--silent", "--insecure", "-G",
+                "--data-urlencode", f"token={token}",
+                f"https://{gateway_ip}:19999/getSignature",
+            ],
+            check=True,
+            preexec_fn=enter_namespace,
+        )
+        data = json.loads(stdout)
+        return PayloadAndSignature(
+            payload=Payload(data["payload"]),
+            signature=Signature(data["signature"]),
+        )
+
+    def _decode_port(self, payload: Payload) -> int:
+        return json.loads(base64.b64decode(payload))["port"]
+
+    async def _bind_port(
+        self,
+        gateway_ip: str,
+        pas: PayloadAndSignature,
+        enter_namespace: EnterNamespace,
+    ) -> None:
+        _, stdout = await run(
+            [
+                "curl", "--silent", "--insecure", "-G",
+                "--data-urlencode", f"payload={pas.payload}",
+                "--data-urlencode", f"signature={pas.signature}",
+                f"https://{gateway_ip}:19999/bindPort",
+            ],
+            check=True,
+            preexec_fn=enter_namespace,
+        )
+        data = json.loads(stdout)
+        if data.get("status") != "OK":
+            logger.warning("Unexpected bindPort response: {}", data)
+
+    async def _allocate_forwarded_port(
+        self,
+        gateway_ip: str, auth: Auth, enter_namespace: EnterNamespace
+    ) -> ForwardedPort:
+        token = await self._get_auth_token(auth)
+        pas = await self._get_port_signature(gateway_ip, token, enter_namespace)
+        port = self._decode_port(pas.payload)
+        await self._bind_port(gateway_ip, pas, enter_namespace)
+        logger.info("Forwarded port {} allocated", port)
+        return ForwardedPort(number=port, payload_and_signature=pas)
+
+    async def _rebind_loop(
+        self,
+        gateway_ip: str,
+        forwarded_port: ForwardedPort,
+        enter_namespace: EnterNamespace,
+        interval: float = _REBIND_INTERVAL,
+    ) -> None:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self._bind_port(gateway_ip, forwarded_port.payload_and_signature, enter_namespace)
+                logger.debug("Port {} rebound", forwarded_port.number)
+            except Exception:
+                logger.warning(
+                    "Failed to rebind port {}, will retry in {}s",
+                    forwarded_port.number,
+                    interval,
+                )
+
     @asynccontextmanager
     async def connect(
         self,
         netns_name: str,
         *,
-        enter_netns: Callable[[], None],
+        enter_namespace: EnterNamespace,
         credentials: dict[str, str],
         region_id: str,
-        forwarded_port_count: int = 0,
     ) -> AsyncIterator[Session]:
         auth = _auth_from_credentials(credentials)
-        async with _module_connect(
-            netns_name,
-            auth,
-            RegionID(region_id),
-            enter_netns=enter_netns,
-            forwarded_port_count=forwarded_port_count,
-        ) as session:
-            @asynccontextmanager
-            async def _forward_port() -> AsyncIterator[int]:
-                fp = await allocate_forwarded_port(session.gateway_ip, auth, enter_netns)
-                task = asyncio.create_task(rebind_loop(session.gateway_ip, fp, enter_netns))
-                try:
-                    yield fp.number
-                finally:
-                    task.cancel()
-                    await asyncio.gather(task, return_exceptions=True)
+        server_ip, server_port = await self._fetch_server(region_id)
+        logger.info("Connecting to PIA region {} via {}:{}", region_id, server_ip, server_port)
 
-            yield Session(
-                gateway_ip=session.gateway_ip,
-                tun_ip=session.tun_ip,
-                dns_servers=session.dns_servers,
-                forwarded_ports=tuple(fp.number for fp in session.forwarded_ports),
-                forward_port=_forward_port,
-            )
+        async with credentials_file(auth) as credentials_file_path:
+            async with OpenVPN.connect(
+                netns_name,
+                server_ip,
+                server_port,
+                credentials_file_path,
+                enter_namespace=enter_namespace,
+                ca_cert_path=_DEFAULT_CA_CERT_PATH,
+            ) as connection_info:
+                @asynccontextmanager
+                async def _forward_port() -> AsyncIterator[int]:
+                    fp = await self._allocate_forwarded_port(connection_info.gateway_ip, auth, enter_namespace)
+                    task = asyncio.create_task(self._rebind_loop(connection_info.gateway_ip, fp, enter_namespace))
+                    try:
+                        yield fp.number
+                    finally:
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+
+                yield Session(
+                    gateway_ip=connection_info.gateway_ip,
+                    tun_ip=connection_info.tun_ip,
+                    dns_servers=connection_info.dns_servers,
+                    forward_port=_forward_port,
+                )
 
     async def list_regions(self) -> list[Region]:
-        regions = await fetch_regions()
-        return [
-            Region(id=r.id, name=r.name, country=r.country, port_forward=r.port_forward)
-            for r in regions
-        ]
+        return await self._fetch_regions()
 
 
+async def fetch_regions() -> list[Region]:
+    return await PIABackend._fetch_regions()

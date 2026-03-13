@@ -21,7 +21,7 @@ class Config(BaseModel):
     vpn_credentials: dict[str, str] | None = None
     vpn_backend: str | None = None
     region_id: str | None = None
-    number_of_ports_to_forward: int = 0
+    names_of_ports_to_forward: list[str] = []
     port_rebind_every: float = _ONE_WEEK
 
     def merge_with(self, other: "Config") -> "Config":

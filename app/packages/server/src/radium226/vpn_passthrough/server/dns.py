@@ -3,16 +3,16 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from ._run import run
-from .netns import Namespace
+from .namespace import Namespace
 
 
 class DNS:
     @staticmethod
     @asynccontextmanager
-    async def setup(netns: Namespace, nameservers: list[str] | None = None) -> AsyncIterator[None]:
+    async def setup(namespace: Namespace, nameservers: list[str] | None = None) -> AsyncIterator[None]:
         if nameservers is None:
             nameservers = ["1.1.1.1"]
-        resolv_file_path = netns.directory / "resolv.conf"
+        resolv_file_path = namespace.directory / "resolv.conf"
         resolv_file_path.write_text(
             "# Created by VPN PassThrough\n\n"
             + "".join(f"nameserver {ns}\n" for ns in nameservers)
@@ -20,7 +20,7 @@ class DNS:
 
         # Use only files + dns for hosts resolution — strips mdns/resolve/myhostname
         # which could bypass the VPN tunnel and leak DNS queries to the host.
-        nsswitch_file_path = netns.directory / "nsswitch.conf"
+        nsswitch_file_path = namespace.directory / "nsswitch.conf"
         nsswitch_file_path.write_text(
             "# Created by VPN PassThrough\n\n"
             "passwd:   files\n"
@@ -56,12 +56,12 @@ class DNS:
         await run(
             ["mount", "--bind", str(resolv_file_path.resolve()), "/etc/resolv.conf"],
             check=True,
-            preexec_fn=netns.enter,
+            preexec_fn=namespace.enter,
         )
         await run(
             ["mount", "--bind", str(nsswitch_file_path.resolve()), "/etc/nsswitch.conf"],
             check=True,
-            preexec_fn=netns.enter,
+            preexec_fn=namespace.enter,
         )
 
         try:

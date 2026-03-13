@@ -16,6 +16,7 @@ from radium226.vpn_passthrough.ipc.protocol import Emit
 
 from radium226.vpn_passthrough.messages import (
     CommandNotFound,
+    ConfigUsed,
     ConnectedToVPN,
     DNSConfigured,
     RegionsListed,
@@ -30,6 +31,7 @@ from radium226.vpn_passthrough.messages import (
     ProcessRestarted,
     ProcessStarted,
     ProcessTerminated,
+    PortsRebound,
     RunProcess,
     StartTunnel,
     TunnelCreated,
@@ -43,9 +45,9 @@ from radium226.vpn_passthrough.messages import (
 )
 from radium226.vpn_passthrough.vpn import get_backend
 from .dns import DNS
-from .dns_leak_guard import DnsLeakGuard
+from .dns_leak_guard import DNSLeakGuard
 from .internet import Internet
-from .netns import Namespace
+from .namespace import Namespace
 from .network_interfaces import NetworkInterfaces
 from .linux import make_preexec_fn
 
@@ -57,7 +59,7 @@ class _TunnelContext:
     public_ip: str
     gateway_ip: str
     tun_ip: str
-    forwarded_ports: list[int]
+    forwarded_ports: dict[str, int]
     region_id: str | None = None
     forward_port: Callable[[], AbstractAsyncContextManager[int]] | None = None
 
@@ -78,6 +80,7 @@ class Service():
         self._on_tunnels_changed = on_tunnels_changed
         self._tunnel_stop_signals: dict[TunnelName, asyncio.Future[None]] = {}
         self._tunnel_emit_fns: dict[TunnelName, Any] = {}  # Emit[TunnelStatusUpdated]
+        self._tunnel_rebind_conditions: dict[TunnelName, asyncio.Condition] = {}
 
     @classmethod
     @asynccontextmanager
@@ -101,7 +104,7 @@ class Service():
                 public_ip=ctx.public_ip if ctx is not None else None,
                 gateway_ip=ctx.gateway_ip if ctx is not None else None,
                 tun_ip=ctx.tun_ip if ctx is not None else None,
-                forwarded_ports=ctx.forwarded_ports if ctx is not None else [],
+                forwarded_ports=ctx.forwarded_ports if ctx is not None else {},
                 processes=procs,
             ))
         return tunnels
@@ -117,40 +120,45 @@ class Service():
 
     async def _setup_tunnel(
         self,
-        name: TunnelName,
+        tunnel_name: TunnelName,
         region_id: str | None,
         credentials: dict[str, str] | None,
-        number_of_ports_to_forward: int,
+        names_of_ports_to_forward: list[str],
         emit: Any,
         backend: str | None = None,
     ) -> None:
+        self._tunnel_rebind_conditions[tunnel_name] = asyncio.Condition()
         stack = AsyncExitStack()
         try:
-            netns = await stack.enter_async_context(Namespace.create(name, base_folder_path=self.namespace_base_folder_path))
-            ni = await stack.enter_async_context(NetworkInterfaces.add(netns))
-            await stack.enter_async_context(Internet.share(name, ni))
+            namespace = await stack.enter_async_context(Namespace.create(tunnel_name, base_folder_path=self.namespace_base_folder_path))
+            network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace))
+            await stack.enter_async_context(Internet.share(tunnel_name, network_interfaces))
 
             if region_id is not None and credentials is not None:
                 backend_instance = get_backend(backend or "pia")
                 session = await stack.enter_async_context(
                     backend_instance.connect(
-                        name,
-                        enter_netns=netns.enter,
+                        tunnel_name,
+                        enter_namespace=namespace.enter,
                         credentials=credentials,
                         region_id=region_id,
-                        forwarded_port_count=number_of_ports_to_forward,
                     )
                 )
+
                 nameservers = list(session.dns_servers)
-                logger.info("DNS configured in tunnel {} (nameservers={})", name, nameservers)
+                await stack.enter_async_context(DNS.setup(namespace, nameservers=nameservers))
+                await stack.enter_async_context(DNSLeakGuard.activate(namespace, network_interfaces))
+                logger.info("DNS configured in tunnel {} (nameservers={})", tunnel_name, nameservers)
                 await emit(DNSConfigured(nameservers=nameservers), [])
-                await stack.enter_async_context(DNS.setup(netns, nameservers=nameservers))
-                await stack.enter_async_context(DnsLeakGuard.activate(netns, ni))
-                forwarded_ports = list(session.forwarded_ports)
-                remote_ip = await self._fetch_remote_ip(netns)
-                logger.info("Connected to VPN in tunnel {} (gateway={}, remote_ip={})", name, session.gateway_ip, remote_ip)
+
+                forwarded_ports: dict[str, int] = {}
+                for port_name in names_of_ports_to_forward:
+                    port = await stack.enter_async_context(session.forward_port())
+                    forwarded_ports[port_name] = port
+                remote_ip = await self._fetch_remote_ip(namespace)
+                logger.info("Connected to VPN in tunnel {} (gateway={}, remote_ip={})", tunnel_name, session.gateway_ip, remote_ip)
                 await emit(ConnectedToVPN(remote_ip=remote_ip, gateway_ip=session.gateway_ip, tun_ip=session.tun_ip, forwarded_ports=forwarded_ports), [])
-                self.tunnel_contexts[name] = _TunnelContext(
+                self.tunnel_contexts[tunnel_name] = _TunnelContext(
                     public_ip=remote_ip,
                     gateway_ip=session.gateway_ip,
                     tun_ip=session.tun_ip,
@@ -159,12 +167,13 @@ class Service():
                     forward_port=session.forward_port,
                 )
             else:
-                await stack.enter_async_context(DNS.setup(netns, nameservers=None))
+                await stack.enter_async_context(DNS.setup(namespace, nameservers=None))
+                await emit(DNSConfigured(nameservers=[]), [])
 
-            self.namespaces[name] = netns
-            self.exit_stacks[name] = stack
+            self.namespaces[tunnel_name] = namespace
+            self.exit_stacks[tunnel_name] = stack
         except BaseException:
-            self.tunnel_contexts.pop(name, None)
+            self.tunnel_contexts.pop(tunnel_name, None)
             await stack.aclose()
             raise
 
@@ -180,29 +189,18 @@ class Service():
 
         stdin_fd, stdout_fd, stderr_fd = fds[0], fds[1], fds[2]
         kill_signal = request.kill_with or signal.SIGTERM
-        restart_every = (
-            max(request.restart_every, _MIN_RESTART_INTERVAL)
-            if request.restart_every is not None
-            else None
-        )
-        port_rebind_every = (
-            max(request.port_rebind_every, _MIN_RESTART_INTERVAL)
-            if request.port_rebind_every is not None
-            else None
-        )
 
         if request.in_tunnel is None:
             raise ValueError("RunProcess requires in_tunnel")
         if request.username is None:
             raise ValueError("RunProcess requires username")
 
-        tunnel_name_for_setup = request.in_tunnel.name
-        if tunnel_name_for_setup not in self.namespaces:
-            logger.info("Lazily creating tunnel {} for process", tunnel_name_for_setup)
-            await self._setup_tunnel(tunnel_name_for_setup, None, None, 0, emit)
+        tunnel_name = request.in_tunnel.name
+        if tunnel_name not in self.namespaces:
+            logger.info("Lazily creating tunnel {} for process", tunnel_name)
+            await self._setup_tunnel(tunnel_name, None, None, [], emit)
 
-        namespace = self.namespaces[request.in_tunnel.name]
-        tunnel_ctx_for_rebind = self.tunnel_contexts.get(request.in_tunnel.name) if port_rebind_every is not None else None
+        namespace = self.namespaces[tunnel_name]
 
         preexec_fn = make_preexec_fn(
             request.username,
@@ -211,7 +209,6 @@ class Service():
         )
 
         first = True
-        next_forwarded_ports: list[int] | None = None
         tunnel_name = request.in_tunnel.name
         self.processes.setdefault(tunnel_name, {})
 
@@ -221,7 +218,7 @@ class Service():
                 "public_ip": ctx.public_ip if ctx is not None else "",
                 "gateway_ip": ctx.gateway_ip if ctx is not None else "",
                 "tun_ip": ctx.tun_ip if ctx is not None else "",
-                "forwarded_ports": ctx.forwarded_ports if ctx is not None else [],
+                "forwarded_ports": ctx.forwarded_ports if ctx is not None else {},
             }
             try:
                 command = Template(request.command).render(**jinja_vars)
@@ -260,50 +257,24 @@ class Service():
                 await emit(ProcessStarted(pid=process.pid), [])
                 first = False
             else:
-                ports = next_forwarded_ports if next_forwarded_ports is not None else (ctx.forwarded_ports if ctx is not None else [])
+                ports = ctx.forwarded_ports if ctx is not None else {}
                 logger.debug("Process restarted with pid {} (forwarded_ports={})", process.pid, ports)
                 await emit(ProcessRestarted(pid=process.pid, forwarded_ports=ports), [])
-                next_forwarded_ports = None
 
-            timer_tasks: dict[str, asyncio.Task[None]] = {}
-            if restart_every is not None:
-                timer_tasks["restart"] = asyncio.create_task(asyncio.sleep(restart_every))
-            if port_rebind_every is not None and tunnel_ctx_for_rebind is not None and tunnel_ctx_for_rebind.forward_port is not None:
-                timer_tasks["rebind"] = asyncio.create_task(asyncio.sleep(port_rebind_every))
-
-            if timer_tasks:
+            rebind_condition = self._tunnel_rebind_conditions.get(tunnel_name)
+            if rebind_condition is not None:
+                async def _wait_for_tunnel_rebind(cond: asyncio.Condition) -> None:
+                    async with cond:
+                        await cond.wait()
                 wait_task = asyncio.create_task(process.wait())
-                done, pending = await asyncio.wait(
-                    [wait_task, *timer_tasks.values()],
+                rebind_task = asyncio.create_task(_wait_for_tunnel_rebind(rebind_condition))
+                done, _ = await asyncio.wait(
+                    [wait_task, rebind_task],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-                for task in pending:
-                    task.cancel()
-
-                rebind_timer = timer_tasks.get("rebind")
-                restart_timer = timer_tasks.get("restart")
-
-                if rebind_timer is not None and rebind_timer in done:
-                    if tunnel_ctx_for_rebind is None or tunnel_ctx_for_rebind.forward_port is None:
-                        raise RuntimeError("rebind timer fired but no forward_port available")
-                    new_port_number = await self.exit_stacks[tunnel_name].enter_async_context(
-                        tunnel_ctx_for_rebind.forward_port()
-                    )
-                    next_forwarded_ports = [new_port_number]
-                    if ctx is not None:
-                        self.tunnel_contexts[tunnel_name] = _TunnelContext(
-                            public_ip=ctx.public_ip,
-                            gateway_ip=ctx.gateway_ip,
-                            tun_ip=ctx.tun_ip,
-                            forwarded_ports=next_forwarded_ports,
-                            region_id=ctx.region_id,
-                        )
-                    self.processes[tunnel_name].pop(process.pid, None)
-                    await self._notify_tunnel_updated(tunnel_name)
-                    os.killpg(os.getpgid(process.pid), kill_signal)
-                    await process.wait()
-                    continue
-                elif restart_timer is not None and restart_timer in done:
+                wait_task.cancel()
+                rebind_task.cancel()
+                if rebind_task in done:
                     self.processes[tunnel_name].pop(process.pid, None)
                     await self._notify_tunnel_updated(tunnel_name)
                     os.killpg(os.getpgid(process.pid), kill_signal)
@@ -339,12 +310,12 @@ class Service():
 
 
     @staticmethod
-    async def _fetch_remote_ip(netns: Namespace) -> str:
+    async def _fetch_remote_ip(namespace: Namespace) -> str:
         process = await asyncio.create_subprocess_exec(
             "curl", "ifconfig.me",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            preexec_fn=netns.enter,
+            preexec_fn=namespace.enter,
         )
         stdout, stderr = await process.communicate()
 
@@ -363,7 +334,7 @@ class Service():
         fds: list[int],
         emit: Emit[ConnectedToVPN | DNSConfigured],
     ) -> tuple[TunnelCreated, list[int]]:
-        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.number_of_ports_to_forward, emit, backend=request.backend)
+        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.names_of_ports_to_forward, emit, backend=request.backend)
         logger.info("Tunnel {} created", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
@@ -373,9 +344,15 @@ class Service():
         self,
         request: StartTunnel,
         fds: list[int],
-        emit: Emit[TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated],
+        emit: Emit[ConfigUsed | TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated | PortsRebound],
     ) -> tuple[TunnelStopped, list[int]]:
-        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.number_of_ports_to_forward, emit, backend=request.backend)
+        await emit(ConfigUsed(
+            region_id=request.region_id,
+            backend=request.backend,
+            names_of_ports_to_forward=request.names_of_ports_to_forward,
+            credentials=request.credentials,
+        ), [])
+        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.names_of_ports_to_forward, emit, backend=request.backend)
         logger.info("Tunnel {} started", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
@@ -385,9 +362,48 @@ class Service():
         loop = asyncio.get_running_loop()
         stop: asyncio.Future[None] = loop.create_future()
         self._tunnel_stop_signals[request.name] = stop
+
+        rebind_task: asyncio.Task[None] | None = None
+        if request.rebind_ports_every is not None:
+            rebind_every = max(request.rebind_ports_every, _MIN_RESTART_INTERVAL)
+
+            async def _rebind_loop() -> None:
+                while True:
+                    await asyncio.sleep(rebind_every)
+                    ctx = self.tunnel_contexts.get(request.name)
+                    if ctx is None or ctx.forward_port is None:
+                        break
+                    new_ports: dict[str, int] = {}
+                    for port_name in ctx.forwarded_ports:
+                        new_port = await self.exit_stacks[request.name].enter_async_context(ctx.forward_port())
+                        new_ports[port_name] = new_port
+                    self.tunnel_contexts[request.name] = _TunnelContext(
+                        public_ip=ctx.public_ip,
+                        gateway_ip=ctx.gateway_ip,
+                        tun_ip=ctx.tun_ip,
+                        forwarded_ports=new_ports,
+                        region_id=ctx.region_id,
+                        forward_port=ctx.forward_port,
+                    )
+                    logger.info("Rebound ports for tunnel {} (new_ports={})", request.name, new_ports)
+                    await emit(PortsRebound(forwarded_ports=new_ports), [])
+                    await self._notify_tunnel_updated(request.name)
+                    condition = self._tunnel_rebind_conditions.get(request.name)
+                    if condition is not None:
+                        async with condition:
+                            condition.notify_all()
+
+            rebind_task = asyncio.create_task(_rebind_loop())
+
         try:
             await stop
         finally:
+            if rebind_task is not None:
+                rebind_task.cancel()
+                try:
+                    await rebind_task
+                except asyncio.CancelledError:
+                    pass
             self._tunnel_emit_fns.pop(request.name, None)
             self._tunnel_stop_signals.pop(request.name, None)
         return TunnelStopped(request_id=request.id, name=request.name), []
@@ -401,6 +417,7 @@ class Service():
         self.namespaces.pop(request.name, None)
         self.tunnel_contexts.pop(request.name, None)
         self.processes.pop(request.name, None)
+        self._tunnel_rebind_conditions.pop(request.name, None)
 
         # Unblock handle_start_tunnel (and thus the client) before the slow
         # stack teardown so the client sees the stop immediately.

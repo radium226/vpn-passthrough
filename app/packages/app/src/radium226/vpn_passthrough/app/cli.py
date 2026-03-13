@@ -22,7 +22,7 @@ from prettytable import PrettyTable
 
 from radium226.vpn_passthrough.server import Server
 from radium226.vpn_passthrough.client import Client
-from radium226.vpn_passthrough.messages import Tunnel
+from radium226.vpn_passthrough.messages import ConfigUsed, PortsRebound, Tunnel
 from radium226.vpn_passthrough.messages import TunnelInfo
 from radium226.vpn_passthrough.app.config import Config, TUNNEL_CONFIGS_DIR
 from radium226.vpn_passthrough.app.systemd import sd_notify
@@ -158,18 +158,6 @@ def start_server(config: Config) -> None:
 
 @app.command("run-process")
 @click.option(
-    "--restart-every",
-    type=float,
-    default=None,
-    help="Kill and restart the command every N seconds.",
-)
-@click.option(
-    "--port-rebind-every",
-    type=float,
-    default=None,
-    help="Allocate a new forwarded port and restart the process every N seconds (default: 300).",
-)
-@click.option(
     "--kill-with",
     type=int,
     default=None,
@@ -186,10 +174,9 @@ def start_server(config: Config) -> None:
 @click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
 @click.argument("command", nargs=-1, required=True)
 @pass_config
-def run_process(config: Config, restart_every: float | None, port_rebind_every: float | None, kill_with: int | None, tunnel_name: str | None, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, command: tuple[str, ...]) -> None:
+def run_process(config: Config, kill_with: int | None, tunnel_name: str | None, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, command: tuple[str, ...]) -> None:
     credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
     backend = vpn_backend or config.vpn_backend
-    port_rebind_every = port_rebind_every if port_rebind_every is not None else config.port_rebind_every
 
     async def _run() -> None:
         loop = asyncio.get_running_loop()
@@ -215,8 +202,6 @@ def run_process(config: Config, restart_every: float | None, port_rebind_every: 
                         command[0],
                         list(command[1:]),
                         fds=[os.dup(0), os.dup(1), os.dup(2)],
-                        restart_every=restart_every,
-                        port_rebind_every=port_rebind_every,
                         kill_with=kill_with,
                         in_tunnel=Tunnel(name=effective_tunnel_name),
                         cwd=str(Path.cwd()),
@@ -318,14 +303,15 @@ def debug_tunnel(config: Config, tunnel_name: str | None, region_id: str | None,
 @click.option("--credential", "credential_items", multiple=True, help="VPN credential as key=value (repeatable, overrides config file).")
 @click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
 @click.option("--without-vpn", "without_vpn", is_flag=True, default=False, help="Create the tunnel without connecting to VPN.")
-@click.option("--number-of-ports-to-forward", "number_of_ports_to_forward", type=int, default=None, envvar="VPN_PASSTHROUGH_NUMBER_OF_PORTS_TO_FORWARD", help="Number of ports to forward through the VPN.")
+@click.option("--forward-port-for", "names_of_ports_to_forward", multiple=True, help="Forward a port with the given name (repeatable, e.g. --forward-port-for transmission).")
 @click.argument("name")
 @pass_config
-def create_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, number_of_ports_to_forward: int | None, name: str) -> None:
+def create_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, names_of_ports_to_forward: tuple[str, ...], name: str) -> None:
+    config = config.merge_with(Config._from_file(TUNNEL_CONFIGS_DIR / f"{name}.yaml"))
     credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
     backend = vpn_backend or config.vpn_backend
     region_id = region_id or config.region_id
-    number_of_ports_to_forward = number_of_ports_to_forward if number_of_ports_to_forward is not None else config.number_of_ports_to_forward
+    resolved_names = list(names_of_ports_to_forward) if names_of_ports_to_forward else config.names_of_ports_to_forward
 
     async def _run() -> None:
         async with Client.connect(config.socket_file_path) as client:
@@ -333,7 +319,7 @@ def create_tunnel(config: Config, region_id: str | None, credential_items: tuple
                 resolved_region_id, resolved_credentials = None, None
             elif credentials is not None and region_id is None:
                 countries = await client.list_regions(backend=backend)
-                if number_of_ports_to_forward > 0:
+                if resolved_names:
                     countries = [c for c in countries if c.port_forward]
                 chosen = random.choice(countries)
                 click.echo(f"No region specified, randomly chose: {chosen.name} ({chosen.region_id})")
@@ -353,7 +339,7 @@ def create_tunnel(config: Config, region_id: str | None, credential_items: tuple
 
             created = False
             try:
-                await client.create_tunnel(name, region_id=resolved_region_id, credentials=resolved_credentials, number_of_ports_to_forward=number_of_ports_to_forward, backend=backend)
+                await client.create_tunnel(name, region_id=resolved_region_id, credentials=resolved_credentials, names_of_ports_to_forward=resolved_names, backend=backend)
                 created = True
                 await stop
             finally:
@@ -370,16 +356,18 @@ def create_tunnel(config: Config, region_id: str | None, credential_items: tuple
 @click.option("--credential", "credential_items", multiple=True, help="VPN credential as key=value (repeatable, overrides config file).")
 @click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
 @click.option("--without-vpn", "without_vpn", is_flag=True, default=False, help="Start the tunnel without connecting to VPN.")
-@click.option("--number-of-ports-to-forward", "number_of_ports_to_forward", type=int, default=None, envvar="VPN_PASSTHROUGH_NUMBER_OF_PORTS_TO_FORWARD", help="Number of ports to forward through the VPN.")
+@click.option("--forward-port-for", "names_of_ports_to_forward", multiple=True, help="Forward a port with the given name (repeatable, e.g. --forward-port-for transmission).")
+@click.option("--rebind-ports-every", "rebind_ports_every", type=float, default=None, help="Reallocate forwarded ports every N seconds (default: from config).")
 @click.option("--persistent", "persistent", is_flag=True, default=False, help=f"Write the resolved tunnel config to {TUNNEL_CONFIGS_DIR}/<name>.yaml so future invocations reuse it.")
 @click.argument("name")
 @pass_config
-def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, number_of_ports_to_forward: int | None, persistent: bool, name: str) -> None:
+def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, names_of_ports_to_forward: tuple[str, ...], rebind_ports_every: float | None, persistent: bool, name: str) -> None:
     config = config.merge_with(Config._from_file(TUNNEL_CONFIGS_DIR / f"{name}.yaml"))
     credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
     backend = vpn_backend or config.vpn_backend
     region_id = region_id or config.region_id
-    number_of_ports_to_forward = number_of_ports_to_forward if number_of_ports_to_forward is not None else config.number_of_ports_to_forward
+    resolved_names = list(names_of_ports_to_forward) if names_of_ports_to_forward else config.names_of_ports_to_forward
+    rebind_ports_every = rebind_ports_every if rebind_ports_every is not None else config.port_rebind_every
 
     async def _run() -> None:
         async with Client.connect(config.socket_file_path) as client:
@@ -387,7 +375,7 @@ def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[
                 resolved_region_id, resolved_credentials = None, None
             elif credentials is not None and region_id is None:
                 countries = await client.list_regions(backend=backend)
-                if number_of_ports_to_forward > 0:
+                if resolved_names:
                     countries = [c for c in countries if c.port_forward]
                 chosen = random.choice(countries)
                 click.echo(f"No region specified, randomly chose: {chosen.name} ({chosen.region_id})")
@@ -407,8 +395,8 @@ def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[
                     data["vpn_credentials"] = resolved_credentials
                 if backend is not None:
                     data["vpn_backend"] = backend
-                if number_of_ports_to_forward:
-                    data["number_of_ports_to_forward"] = number_of_ports_to_forward
+                if resolved_names:
+                    data["names_of_ports_to_forward"] = resolved_names
                 with tunnel_config_path.open("w") as f:
                     yaml.dump(data, f, default_flow_style=False)
                 logger.info("Wrote tunnel config to {}", tunnel_config_path)
@@ -419,10 +407,28 @@ def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[
             def on_ready() -> None:
                 sd_notify("READY=1")
 
+            def on_config_used(config_used: ConfigUsed) -> None:
+                lines = [
+                    f"  backend:                  {config_used.backend or 'pia (default)'}",
+                    f"  region_id:                {config_used.region_id or '(none)'}",
+                    f"  names_of_ports_to_forward:  {config_used.names_of_ports_to_forward}",
+                ]
+                if config_used.credentials:
+                    for key, value in config_used.credentials.items():
+                        masked = value[:2] + "***" if len(value) > 2 else "***"
+                        lines.append(f"  credentials.{key}:          {masked}")
+                else:
+                    lines.append("  credentials:              (none)")
+                click.echo("Config used:\n" + "\n".join(lines))
+
             def on_tunnel_status_updated(info: TunnelInfo) -> None:
                 n = len(info.processes)
                 word = "process" if n == 1 else "processes"
                 sd_notify(f"STATUS={n} {word} running")
+
+            def on_ports_rebound(event: PortsRebound) -> None:
+                parts = ", ".join(f"{k}={v}" for k, v in event.forwarded_ports.items())
+                click.echo(f"Ports rebound: {parts}")
 
             def _stop(sig: signal.Signals) -> None:
                 nonlocal stopping
@@ -439,10 +445,13 @@ def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[
                     name,
                     region_id=resolved_region_id,
                     credentials=resolved_credentials,
-                    number_of_ports_to_forward=number_of_ports_to_forward,
+                    names_of_ports_to_forward=resolved_names,
                     backend=backend,
+                    rebind_ports_every=rebind_ports_every,
                     on_ready=on_ready,
+                    on_config_used=on_config_used,
                     on_tunnel_status_updated=on_tunnel_status_updated,
+                    on_ports_rebound=on_ports_rebound,
                 )
             finally:
                 for sig in (signal.SIGINT, signal.SIGTERM):
@@ -530,7 +539,7 @@ def list_tunnels(config: Config, output_format: str, with_processes: bool) -> No
                         t.public_ip or "",
                         t.gateway_ip or "",
                         t.tun_ip or "",
-                        ", ".join(str(p) for p in t.forwarded_ports),
+                        ", ".join(f"{k}={v}" for k, v in t.forwarded_ports.items()),
                     ]
                     if with_processes:
                         row.append("\n".join(f"{p.pid}: {p.command} {' '.join(p.args)}".strip() for p in t.processes))

@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 members = [
     "radium226-vpn-passthrough-app",
     "radium226-vpn-passthrough-client",
+    "radium226-vpn-passthrough-dummy",
     "radium226-vpn-passthrough-ipc",
     "radium226-vpn-passthrough-messages",
     "radium226-vpn-passthrough-pia",
@@ -393,6 +394,29 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=1.0.0" },
     { name = "radium226-vpn-passthrough-server", editable = "packages/server" },
+    { name = "ruff", specifier = ">=0.15.4" },
+    { name = "ty", specifier = ">=0.0.19" },
+]
+
+[[package]]
+name = "radium226-vpn-passthrough-dummy"
+version = "0.1.0"
+source = { editable = "packages/dummy" }
+dependencies = [
+    { name = "radium226-vpn-passthrough-vpn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "radium226-vpn-passthrough-vpn", editable = "packages/vpn" }]
+
+[package.metadata.requires-dev]
+dev = [
     { name = "ruff", specifier = ">=0.15.4" },
     { name = "ty", specifier = ">=0.0.19" },
 ]

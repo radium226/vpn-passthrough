@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import NewType
 
-RegionID = NewType("RegionID", str)
 User = NewType("User", str)
 Password = NewType("Password", str)
 Payload = NewType("Payload", str)

@@ -5,6 +5,9 @@ from importlib.metadata import entry_points
 from typing import Protocol
 
 
+type EnterNamespace = Callable[[], None]
+
+
 @dataclass(frozen=True)
 class Region:
     id: str
@@ -13,13 +16,15 @@ class Region:
     port_forward: bool = False
 
 
+type ForwardPort = Callable[[], AbstractAsyncContextManager[int]]
+
+
 @dataclass(frozen=True)
 class Session:
     gateway_ip: str
     tun_ip: str
-    dns_servers: tuple[str, ...]
-    forwarded_ports: tuple[int, ...]
-    forward_port: Callable[[], AbstractAsyncContextManager[int]]
+    dns_servers: list[str]
+    forward_port: ForwardPort
 
 
 class Backend(Protocol):
@@ -27,10 +32,9 @@ class Backend(Protocol):
         self,
         netns_name: str,
         *,
-        enter_netns: Callable[[], None],
+        enter_namespace: EnterNamespace,
         credentials: dict[str, str],
         region_id: str,
-        forwarded_port_count: int = 0,
     ) -> AbstractAsyncContextManager[Session]: ...
 
     async def list_regions(self) -> list[Region]: ...

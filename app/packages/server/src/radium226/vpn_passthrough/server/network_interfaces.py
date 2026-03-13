@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from ._run import run
-from .netns import Namespace
+from .namespace import Namespace
 
 
 class NetworkInterfaces:
@@ -32,8 +32,8 @@ class NetworkInterfaces:
 
     @staticmethod
     @asynccontextmanager
-    async def add(netns: Namespace, veth_addr: str | None = None, vpeer_addr: str | None = None) -> AsyncIterator["NetworkInterfaces"]:
-        name = netns.name
+    async def add(namespace: Namespace, veth_addr: str | None = None, vpeer_addr: str | None = None) -> AsyncIterator["NetworkInterfaces"]:
+        name = namespace.name
         slot = int(hashlib.md5(name.encode()).hexdigest()[:4], 16) % 254 + 1
         resolved_veth_addr = veth_addr or f"10.200.{slot}.2"
         resolved_vpeer_addr = vpeer_addr or f"10.200.{slot}.1"
@@ -41,20 +41,20 @@ class NetworkInterfaces:
         veth = f"vpt{slot}v"
         vpeer = f"vpt{slot}p"
 
-        # Create veth pair in host namespace, then move peer into the netns by PID
+        # Create veth pair in host namespace, then move peer into the namespace by PID
         await run(["ip", "link", "add", veth, "type", "veth", "peer", "name", vpeer], check=True)
         try:
-            await run(["ip", "link", "set", vpeer, "netns", str(netns.pid)], check=True)
+            await run(["ip", "link", "set", vpeer, "netns", str(namespace.pid)], check=True)
 
             # Configure host side
             await run(["ip", "addr", "add", f"{resolved_veth_addr}/24", "dev", veth], check=True)
             await run(["ip", "link", "set", veth, "up"], check=True)
 
-            # Configure netns side
-            await run(["ip", "addr", "add", f"{resolved_vpeer_addr}/24", "dev", vpeer], check=True, preexec_fn=netns.enter)
-            await run(["ip", "link", "set", vpeer, "up"], check=True, preexec_fn=netns.enter)
-            await run(["ip", "link", "set", "lo", "up"], check=True, preexec_fn=netns.enter)
-            await run(["ip", "route", "add", "default", "via", resolved_veth_addr], check=True, preexec_fn=netns.enter)
+            # Configure namespace side
+            await run(["ip", "addr", "add", f"{resolved_vpeer_addr}/24", "dev", vpeer], check=True, preexec_fn=namespace.enter)
+            await run(["ip", "link", "set", vpeer, "up"], check=True, preexec_fn=namespace.enter)
+            await run(["ip", "link", "set", "lo", "up"], check=True, preexec_fn=namespace.enter)
+            await run(["ip", "route", "add", "default", "via", resolved_veth_addr], check=True, preexec_fn=namespace.enter)
 
             yield NetworkInterfaces(name, veth, vpeer, resolved_veth_addr, resolved_vpeer_addr)
         finally:
