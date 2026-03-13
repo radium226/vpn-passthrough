@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import signal
 from collections.abc import Callable
@@ -279,6 +280,30 @@ class Service():
                     await self._notify_tunnel_updated(tunnel_name)
                     os.killpg(os.getpgid(process.pid), kill_signal)
                     await process.wait()
+                    if request.configure_with is not None:
+                        ctx = self.tunnel_contexts.get(tunnel_name)
+                        payload = {
+                            "public_ip": ctx.public_ip if ctx is not None else None,
+                            "gateway_ip": ctx.gateway_ip if ctx is not None else None,
+                            "tun_ip": ctx.tun_ip if ctx is not None else None,
+                            "forwarded_ports": ctx.forwarded_ports if ctx is not None else {},
+                        }
+                        try:
+                            configure_proc = await asyncio.create_subprocess_exec(
+                                request.configure_with,
+                                stdin=asyncio.subprocess.PIPE,
+                            )
+                            await configure_proc.communicate(json.dumps(payload).encode())
+                            if configure_proc.returncode != 0:
+                                logger.warning(
+                                    "configure-with script {} exited with code {}",
+                                    request.configure_with,
+                                    configure_proc.returncode,
+                                )
+                        except FileNotFoundError:
+                            logger.error("configure-with script not found: {}", request.configure_with)
+                        except Exception as e:
+                            logger.error("configure-with script failed: {}", e)
                     continue
                 else:
                     break

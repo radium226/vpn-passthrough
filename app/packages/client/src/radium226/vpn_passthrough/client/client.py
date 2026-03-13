@@ -66,6 +66,7 @@ class Client:
         username: str | None = None,
         gid: int | None = None,
         on_pid_received: Callable[[int], Awaitable[None]] | None = None,
+        configure_with: str | None = None,
     ) -> int:
         loop = asyncio.get_running_loop()
         exit_code_future: asyncio.Future[int] = loop.create_future()
@@ -100,6 +101,7 @@ class Client:
                 gid=gid,
                 client_pid=os.getpid(),
                 env=dict(os.environ),
+                configure_with=configure_with,
             ),
             handler=ResponseHandler[ProcessStarted | ProcessRestarted, ProcessTerminated | CommandNotFound](
                 on_event=on_event,

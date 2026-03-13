@@ -172,9 +172,10 @@ def start_server(config: Config) -> None:
 @click.option("--region-id", default=None, envvar="VPN_PASSTHROUGH_REGION_ID", help="VPN region ID for the temporary tunnel.")
 @click.option("--credential", "credential_items", multiple=True, help="VPN credential as key=value (repeatable, overrides config file).")
 @click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
+@click.option("--configure-with", "configure_with", default=None, type=click.Path(), help="Script to run after port rebind and before process restart; receives tunnel context as JSON on stdin.")
 @click.argument("command", nargs=-1, required=True)
 @pass_config
-def run_process(config: Config, kill_with: int | None, tunnel_name: str | None, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, command: tuple[str, ...]) -> None:
+def run_process(config: Config, kill_with: int | None, tunnel_name: str | None, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, configure_with: str | None, command: tuple[str, ...]) -> None:
     credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
     backend = vpn_backend or config.vpn_backend
 
@@ -207,6 +208,7 @@ def run_process(config: Config, kill_with: int | None, tunnel_name: str | None, 
                         cwd=str(Path.cwd()),
                         gid=os.getgid(),
                         on_pid_received=handle_pid,
+                        configure_with=configure_with,
                     )
                 finally:
                     for sig in (signal.SIGINT, signal.SIGTERM):

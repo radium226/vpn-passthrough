@@ -49,6 +49,7 @@ class RunProcess(BaseModel, Request[ProcessTerminated | CommandNotFound, Process
     ambient_capabilities: list[int] = []
     client_pid: int | None = None
     env: dict[str, str] = {}
+    configure_with: str | None = None
     type: Literal["run_process"] = "run_process"
 
 
