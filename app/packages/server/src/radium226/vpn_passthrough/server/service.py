@@ -235,6 +235,7 @@ class Service():
 
             if request.configure_with is not None:
                 payload = {
+                    "first": first,
                     "public_ip": ctx.public_ip if ctx is not None else None,
                     "gateway_ip": ctx.gateway_ip if ctx is not None else None,
                     "tun_ip": ctx.tun_ip if ctx is not None else None,
@@ -247,11 +248,28 @@ class Service():
                     )
                     await configure_proc.communicate(json.dumps(payload).encode())
                     if configure_proc.returncode != 0:
-                        logger.warning(
-                            "configure-with script {} exited with code {}",
-                            request.configure_with,
-                            configure_proc.returncode,
-                        )
+                        def _close_fds() -> None:
+                            for fd in (stdin_fd, stdout_fd, stderr_fd):
+                                try:
+                                    os.close(fd)
+                                except OSError as close_err:
+                                    logger.warning("Failed to close fd {}: {}", fd, close_err)
+                        if first:
+                            logger.error(
+                                "configure-with script {} failed on first start (exit code {}), aborting",
+                                request.configure_with,
+                                configure_proc.returncode,
+                            )
+                            _close_fds()
+                            return ProcessTerminated(request_id=request.id, exit_code=configure_proc.returncode or 1), []
+                        else:
+                            logger.info(
+                                "configure-with script {} returned {}, not restarting process",
+                                request.configure_with,
+                                configure_proc.returncode,
+                            )
+                            _close_fds()
+                            return ProcessTerminated(request_id=request.id, exit_code=0), []
                 except FileNotFoundError:
                     logger.error("configure-with script not found: {}", request.configure_with)
                 except Exception as e:
