@@ -1,0 +1,16 @@
+[Unit]
+Description=VPN Passthrough Daemon
+After=network.target
+
+[Service]
+Type=simple
+NotifyAccess=main
+ExecStart=/usr/bin/vpn-passthrough start-server
+Restart=on-failure
+RestartSec=5
+Group=vpn-passthrough
+RuntimeDirectory=vpn-passthrough
+RuntimeDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+d /etc/vpn-passthrough                    0755 root root            -
+d /etc/vpn-passthrough/tunnels            0775 root vpn-passthrough -
+d /run/vpn-passthrough                    0750 root vpn-passthrough -
+d /run/vpn-passthrough/namespaces         0750 root root            -

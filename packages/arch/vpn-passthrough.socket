@@ -1,0 +1,10 @@
+[Unit]
+Description=VPN Passthrough Socket
+
+[Socket]
+ListenStream=/run/vpn-passthrough/ipc.socket
+SocketMode=0660
+SocketGroup=vpn-passthrough
+
+[Install]
+WantedBy=sockets.target

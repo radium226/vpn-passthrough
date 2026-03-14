@@ -1,0 +1,23 @@
+post_install() {
+    echo "To enable and start the vpn-passthrough daemon:"
+    echo "  systemctl enable --now vpn-passthrough"
+}
+
+post_upgrade() {
+    if [ -f /etc/vpn-passthrough/config.yaml.pacnew ]; then
+        echo "A new default config was installed as /etc/vpn-passthrough/config.yaml.pacnew"
+        echo "Review and merge it into /etc/vpn-passthrough/config.yaml"
+    fi
+    if systemctl is-active --quiet vpn-passthrough; then
+        systemctl restart vpn-passthrough
+    fi
+}
+
+pre_remove() {
+    if systemctl is-active --quiet vpn-passthrough; then
+        systemctl stop vpn-passthrough
+    fi
+    if systemctl is-enabled --quiet vpn-passthrough; then
+        systemctl disable vpn-passthrough
+    fi
+}

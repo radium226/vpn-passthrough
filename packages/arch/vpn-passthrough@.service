@@ -1,0 +1,15 @@
+[Unit]
+Description=VPN Passthrough Tunnel %i
+After=vpn-passthrough.service
+Requires=vpn-passthrough.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/vpn-passthrough --skip-user-config --config /etc/vpn-passthrough/tunnels/%i.yaml start-tunnel %i
+Restart=on-failure
+RestartSec=5
+Group=vpn-passthrough
+
+[Install]
+WantedBy=multi-user.target
