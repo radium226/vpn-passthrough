@@ -135,6 +135,7 @@ class Client:
         credentials: dict[str, str] | None = None,
         names_of_ports_to_forward: list[str] | None = None,
         backend: str | None = None,
+        veth_cidr: str | None = None,
         on_tunnel_info_changed: Callable[[TunnelInfo], None] | None = None,
     ) -> TunnelCreated:
         loop = asyncio.get_running_loop()
@@ -159,6 +160,7 @@ class Client:
                 credentials=credentials,
                 names_of_ports_to_forward=names_of_ports_to_forward or [],
                 backend=backend,
+                veth_cidr=veth_cidr,
             ),
             handler=ResponseHandler[ConnectedToVPN | DNSConfigured, TunnelCreated](
                 on_event=on_event,
@@ -178,6 +180,7 @@ class Client:
         names_of_ports_to_forward: list[str] | None = None,
         backend: str | None = None,
         rebind_ports_every: float | None = None,
+        veth_cidr: str | None = None,
         on_ready: Callable[[], None] | None = None,
         on_config_used: Callable[[ConfigUsed], None] | None = None,
         on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None,
@@ -220,6 +223,7 @@ class Client:
                 names_of_ports_to_forward=names_of_ports_to_forward or [],
                 backend=backend,
                 rebind_ports_every=rebind_ports_every,
+                veth_cidr=veth_cidr,
             ),
             handler=ResponseHandler[ConfigUsed | TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated | PortsRebound, TunnelStopped](
                 on_event=on_event,

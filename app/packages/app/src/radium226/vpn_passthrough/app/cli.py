@@ -306,9 +306,10 @@ def debug_tunnel(config: Config, tunnel_name: str | None, region_id: str | None,
 @click.option("--vpn-backend", "vpn_backend", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="VPN backend name (default: pia).")
 @click.option("--without-vpn", "without_vpn", is_flag=True, default=False, help="Create the tunnel without connecting to VPN.")
 @click.option("--forward-port-for", "names_of_ports_to_forward", multiple=True, help="Forward a port with the given name (repeatable, e.g. --forward-port-for transmission).")
+@click.option("--veth-cidr", "veth_cidr", default=None, help="Fixed CIDR for the veth pair (e.g. 10.200.5.0/24). If omitted, an address is derived from the tunnel name.")
 @click.argument("name")
 @pass_config
-def create_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, names_of_ports_to_forward: tuple[str, ...], name: str) -> None:
+def create_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, names_of_ports_to_forward: tuple[str, ...], veth_cidr: str | None, name: str) -> None:
     config = config.merge_with(Config._from_file(TUNNEL_CONFIGS_DIR / f"{name}.yaml"))
     credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
     backend = vpn_backend or config.vpn_backend
@@ -341,7 +342,7 @@ def create_tunnel(config: Config, region_id: str | None, credential_items: tuple
 
             created = False
             try:
-                await client.create_tunnel(name, region_id=resolved_region_id, credentials=resolved_credentials, names_of_ports_to_forward=resolved_names, backend=backend)
+                await client.create_tunnel(name, region_id=resolved_region_id, credentials=resolved_credentials, names_of_ports_to_forward=resolved_names, backend=backend, veth_cidr=veth_cidr)
                 created = True
                 await stop
             finally:
@@ -361,9 +362,10 @@ def create_tunnel(config: Config, region_id: str | None, credential_items: tuple
 @click.option("--forward-port-for", "names_of_ports_to_forward", multiple=True, help="Forward a port with the given name (repeatable, e.g. --forward-port-for transmission).")
 @click.option("--rebind-ports-every", "rebind_ports_every", type=float, default=None, help="Reallocate forwarded ports every N seconds (default: from config).")
 @click.option("--persistent", "persistent", is_flag=True, default=False, help=f"Write the resolved tunnel config to {TUNNEL_CONFIGS_DIR}/<name>.yaml so future invocations reuse it.")
+@click.option("--veth-cidr", "veth_cidr", default=None, help="Fixed CIDR for the veth pair (e.g. 10.200.5.0/24). If omitted, an address is derived from the tunnel name.")
 @click.argument("name")
 @pass_config
-def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, names_of_ports_to_forward: tuple[str, ...], rebind_ports_every: float | None, persistent: bool, name: str) -> None:
+def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, names_of_ports_to_forward: tuple[str, ...], rebind_ports_every: float | None, persistent: bool, veth_cidr: str | None, name: str) -> None:
     config = config.merge_with(Config._from_file(TUNNEL_CONFIGS_DIR / f"{name}.yaml"))
     credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
     backend = vpn_backend or config.vpn_backend
@@ -450,6 +452,7 @@ def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[
                     names_of_ports_to_forward=resolved_names,
                     backend=backend,
                     rebind_ports_every=rebind_ports_every,
+                    veth_cidr=veth_cidr,
                     on_ready=on_ready,
                     on_config_used=on_config_used,
                     on_tunnel_status_updated=on_tunnel_status_updated,

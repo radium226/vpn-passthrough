@@ -127,12 +127,13 @@ class Service():
         names_of_ports_to_forward: list[str],
         emit: Any,
         backend: str | None = None,
+        veth_cidr: str | None = None,
     ) -> None:
         self._tunnel_rebind_conditions[tunnel_name] = asyncio.Condition()
         stack = AsyncExitStack()
         try:
             namespace = await stack.enter_async_context(Namespace.create(tunnel_name, base_folder_path=self.namespace_base_folder_path))
-            network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace))
+            network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace, cidr=veth_cidr))
             await stack.enter_async_context(Internet.share(tunnel_name, network_interfaces))
 
             if region_id is not None and credentials is not None:
@@ -377,7 +378,7 @@ class Service():
         fds: list[int],
         emit: Emit[ConnectedToVPN | DNSConfigured],
     ) -> tuple[TunnelCreated, list[int]]:
-        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.names_of_ports_to_forward, emit, backend=request.backend)
+        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.names_of_ports_to_forward, emit, backend=request.backend, veth_cidr=request.veth_cidr)
         logger.info("Tunnel {} created", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
@@ -395,7 +396,7 @@ class Service():
             names_of_ports_to_forward=request.names_of_ports_to_forward,
             credentials=request.credentials,
         ), [])
-        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.names_of_ports_to_forward, emit, backend=request.backend)
+        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.names_of_ports_to_forward, emit, backend=request.backend, veth_cidr=request.veth_cidr)
         logger.info("Tunnel {} started", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())

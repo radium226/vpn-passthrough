@@ -86,7 +86,7 @@ class Internet:
         await run(["sysctl", "-w", "net.ipv4.ip_forward=1"], check=True)
 
         nft_name = _nft_ident(name)
-        subnet = ".".join(network_interfaces.vpeer_addr.split(".")[:3]) + ".0/24"
+        subnet = network_interfaces.subnet
         nft_rules = string.Template(_NFT_TEMPLATE).substitute(name=nft_name, subnet=subnet)
 
         process = await asyncio.create_subprocess_exec(
