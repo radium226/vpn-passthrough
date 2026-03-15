@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+set -euEo pipefail
+
+main()
+{
+    uvx \
+        --from="git+https://github.com/radium226/variables.git" \
+            variables \
+                exec \
+                    -v "./variables.yaml" \
+                    -- \
+                        bash -c '
+                            private_key_file="$(mktemp)"
+                            trap "rm -f \"${private_key_file}\"" EXIT
+                            chmod 600 "${private_key_file}"
+                            printf "%s" "${PRIVATE_SSH_KEY}" > "${private_key_file}"
+                            exec ssh \
+                                -i "${private_key_file}" \
+                                -o StrictHostKeyChecking=no \
+                                -o IdentitiesOnly=yes \
+                                -o UserKnownHostsFile=/dev/null \
+                                -o LogLevel=ERROR \
+                                    "${REMOTE_USER}@${REMOTE_SERVER_HOST}"
+                        '
+}
+
+main "${@}"

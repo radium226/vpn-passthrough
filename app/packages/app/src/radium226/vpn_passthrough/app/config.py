@@ -23,6 +23,7 @@ class Config(BaseModel):
     region_id: str | None = None
     names_of_ports_to_forward: list[str] = []
     port_rebind_every: float = _ONE_WEEK
+    veth_cidr: str | None = None
 
     def merge_with(self, other: "Config") -> "Config":
         base = self.model_dump()

@@ -307,14 +307,16 @@ def debug_tunnel(config: Config, tunnel_name: str | None, region_id: str | None,
 @click.option("--without-vpn", "without_vpn", is_flag=True, default=False, help="Create the tunnel without connecting to VPN.")
 @click.option("--forward-port-for", "names_of_ports_to_forward", multiple=True, help="Forward a port with the given name (repeatable, e.g. --forward-port-for transmission).")
 @click.option("--veth-cidr", "veth_cidr", default=None, help="Fixed CIDR for the veth pair (e.g. 10.200.5.0/24). If omitted, an address is derived from the tunnel name.")
+@click.option("--save-config", "save_config", is_flag=True, default=False, help=f"Write the resolved tunnel config to {TUNNEL_CONFIGS_DIR}/<name>.yaml so future invocations reuse it.")
 @click.argument("name")
 @pass_config
-def create_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, names_of_ports_to_forward: tuple[str, ...], veth_cidr: str | None, name: str) -> None:
+def create_tunnel(config: Config, region_id: str | None, credential_items: tuple[str, ...], vpn_backend: str | None, without_vpn: bool, names_of_ports_to_forward: tuple[str, ...], veth_cidr: str | None, save_config: bool, name: str) -> None:
     config = config.merge_with(Config._from_file(TUNNEL_CONFIGS_DIR / f"{name}.yaml"))
     credentials = dict(_parse_credential(c) for c in credential_items) if credential_items else config.vpn_credentials
     backend = vpn_backend or config.vpn_backend
     region_id = region_id or config.region_id
     resolved_names = list(names_of_ports_to_forward) if names_of_ports_to_forward else config.names_of_ports_to_forward
+    veth_cidr = veth_cidr or config.veth_cidr
 
     async def _run() -> None:
         async with Client.connect(config.socket_file_path) as client:
@@ -329,6 +331,26 @@ def create_tunnel(config: Config, region_id: str | None, credential_items: tuple
                 resolved_region_id, resolved_credentials = chosen.region_id, credentials
             else:
                 resolved_region_id, resolved_credentials = region_id, credentials
+
+            if save_config:
+                tunnel_config_path = TUNNEL_CONFIGS_DIR / f"{name}.yaml"
+                if tunnel_config_path.exists():
+                    logger.warning("Tunnel config {} already exists, overwriting", tunnel_config_path)
+                tunnel_config_path.parent.mkdir(parents=True, exist_ok=True)
+                data: dict = {}
+                if resolved_region_id is not None:
+                    data["region_id"] = resolved_region_id
+                if resolved_credentials is not None:
+                    data["vpn_credentials"] = resolved_credentials
+                if backend is not None:
+                    data["vpn_backend"] = backend
+                if resolved_names:
+                    data["names_of_ports_to_forward"] = resolved_names
+                if veth_cidr is not None:
+                    data["veth_cidr"] = veth_cidr
+                with tunnel_config_path.open("w") as f:
+                    yaml.dump(data, f, default_flow_style=False)
+                logger.info("Wrote tunnel config to {}", tunnel_config_path)
 
             loop = asyncio.get_running_loop()
             stop: asyncio.Future[None] = loop.create_future()
@@ -372,6 +394,7 @@ def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[
     region_id = region_id or config.region_id
     resolved_names = list(names_of_ports_to_forward) if names_of_ports_to_forward else config.names_of_ports_to_forward
     rebind_ports_every = rebind_ports_every if rebind_ports_every is not None else config.port_rebind_every
+    veth_cidr = veth_cidr or config.veth_cidr
 
     async def _run() -> None:
         async with Client.connect(config.socket_file_path) as client:
@@ -401,6 +424,8 @@ def start_tunnel(config: Config, region_id: str | None, credential_items: tuple[
                     data["vpn_backend"] = backend
                 if resolved_names:
                     data["names_of_ports_to_forward"] = resolved_names
+                if veth_cidr is not None:
+                    data["veth_cidr"] = veth_cidr
                 with tunnel_config_path.open("w") as f:
                     yaml.dump(data, f, default_flow_style=False)
                 logger.info("Wrote tunnel config to {}", tunnel_config_path)
