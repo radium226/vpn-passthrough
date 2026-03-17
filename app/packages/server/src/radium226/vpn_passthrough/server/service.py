@@ -61,6 +61,10 @@ class _TunnelContext:
     gateway_ip: str
     tun_ip: str
     forwarded_ports: dict[str, int]
+    veth: str = ""
+    veth_addr: str = ""
+    vpeer: str = ""
+    vpeer_addr: str = ""
     region_id: str | None = None
     forward_port: Callable[[], AbstractAsyncContextManager[int]] | None = None
 
@@ -165,12 +169,26 @@ class Service():
                     gateway_ip=session.gateway_ip,
                     tun_ip=session.tun_ip,
                     forwarded_ports=forwarded_ports,
+                    veth=network_interfaces.veth,
+                    veth_addr=network_interfaces.veth_addr,
+                    vpeer=network_interfaces.vpeer,
+                    vpeer_addr=network_interfaces.vpeer_addr,
                     region_id=region_id,
                     forward_port=session.forward_port,
                 )
             else:
                 await stack.enter_async_context(DNS.setup(namespace, nameservers=None))
                 await emit(DNSConfigured(nameservers=[]), [])
+                self.tunnel_contexts[tunnel_name] = _TunnelContext(
+                    public_ip="",
+                    gateway_ip="",
+                    tun_ip="",
+                    forwarded_ports={},
+                    veth=network_interfaces.veth,
+                    veth_addr=network_interfaces.veth_addr,
+                    vpeer=network_interfaces.vpeer,
+                    vpeer_addr=network_interfaces.vpeer_addr,
+                )
 
             self.namespaces[tunnel_name] = namespace
             self.exit_stacks[tunnel_name] = stack
@@ -221,6 +239,10 @@ class Service():
                 "gateway_ip": ctx.gateway_ip if ctx is not None else "",
                 "tun_ip": ctx.tun_ip if ctx is not None else "",
                 "forwarded_ports": ctx.forwarded_ports if ctx is not None else {},
+                "veth": ctx.veth if ctx is not None else "",
+                "veth_addr": ctx.veth_addr if ctx is not None else "",
+                "vpeer": ctx.vpeer if ctx is not None else "",
+                "vpeer_addr": ctx.vpeer_addr if ctx is not None else "",
             }
             try:
                 command = Template(request.command).render(**jinja_vars)
@@ -241,6 +263,10 @@ class Service():
                     "gateway_ip": ctx.gateway_ip if ctx is not None else None,
                     "tun_ip": ctx.tun_ip if ctx is not None else None,
                     "forwarded_ports": ctx.forwarded_ports if ctx is not None else {},
+                    "veth": ctx.veth if ctx is not None else None,
+                    "veth_addr": ctx.veth_addr if ctx is not None else None,
+                    "vpeer": ctx.vpeer if ctx is not None else None,
+                    "vpeer_addr": ctx.vpeer_addr if ctx is not None else None,
                 }
                 try:
                     configure_proc = await asyncio.create_subprocess_exec(
@@ -426,6 +452,10 @@ class Service():
                         gateway_ip=ctx.gateway_ip,
                         tun_ip=ctx.tun_ip,
                         forwarded_ports=new_ports,
+                        veth=ctx.veth,
+                        veth_addr=ctx.veth_addr,
+                        vpeer=ctx.vpeer,
+                        vpeer_addr=ctx.vpeer_addr,
                         region_id=ctx.region_id,
                         forward_port=ctx.forward_port,
                     )
