@@ -408,7 +408,8 @@ class Service():
         logger.info("Tunnel {} created", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
-        return TunnelCreated(request_id=request.id, name=request.name), []
+        ctx = self.tunnel_contexts.get(request.name)
+        return TunnelCreated(request_id=request.id, name=request.name, vpeer_ip=ctx.vpeer_addr if ctx is not None else ""), []
 
     async def handle_start_tunnel(
         self,

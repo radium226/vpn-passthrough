@@ -69,6 +69,7 @@ class KillProcess(BaseModel, Request[ProcessKilled, Never]):
 class TunnelCreated(BaseModel):
     request_id: str
     name: str
+    vpeer_ip: str = ""
     type: Literal["tunnel_created"] = "tunnel_created"
 
 
