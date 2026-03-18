@@ -99,8 +99,8 @@ class Connection:
         )
         while data:
             try:
-                n = self._socket.sendmsg([data], ancdata)
-                data = data[n:]
+                number_of_bytes_sent = self._socket.sendmsg([data], ancdata)
+                data = data[number_of_bytes_sent:]
                 ancdata = []
             except BlockingIOError:
                 await self._wait_writable(loop)

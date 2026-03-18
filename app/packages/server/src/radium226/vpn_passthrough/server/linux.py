@@ -107,10 +107,10 @@ def make_preexec_fn(username: str, ns_pid: int, cwd: str | None = None) -> Calla
 
         header = _CapHeader(version=_LINUX_CAPABILITY_VERSION_3, pid=0)
         data = (_CapData * 2)()
-        for i in range(2):
-            data[i].effective = cap_mask[i]
-            data[i].permitted = cap_mask[i]
-            data[i].inheritable = cap_mask[i]
+        for cap_set_index in range(2):
+            data[cap_set_index].effective = cap_mask[cap_set_index]
+            data[cap_set_index].permitted = cap_mask[cap_set_index]
+            data[cap_set_index].inheritable = cap_mask[cap_set_index]
 
         if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
             raise OSError(ctypes.get_errno(), "capset failed")

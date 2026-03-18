@@ -4,9 +4,15 @@ post_install() {
 }
 
 post_upgrade() {
-    if [ -f /etc/vpn-passthrough/config.yaml.pacnew ]; then
-        echo "A new default config was installed as /etc/vpn-passthrough/config.yaml.pacnew"
-        echo "Review and merge it into /etc/vpn-passthrough/config.yaml"
+    for f in server.yaml client.yaml; do
+        if [ -f "/etc/vpn-passthrough/${f}.pacnew" ]; then
+            echo "A new default config was installed as /etc/vpn-passthrough/${f}.pacnew"
+            echo "Review and merge it into /etc/vpn-passthrough/${f}"
+        fi
+    done
+    systemctl daemon-reload
+    if systemctl is-active --quiet vpn-passthrough.socket; then
+        systemctl restart vpn-passthrough.socket
     fi
     if systemctl is-active --quiet vpn-passthrough; then
         systemctl restart vpn-passthrough

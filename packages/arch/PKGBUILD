@@ -73,7 +73,7 @@ package_vpn-passthrough-cli() {
     )
     optdepends=('python-capng: ambient capabilities support')
     install=vpn-passthrough.install
-    backup=('etc/vpn-passthrough/config.yaml')
+    backup=('etc/vpn-passthrough/server.yaml' 'etc/vpn-passthrough/client.yaml')
 
     _install_wheels "${pkgdir}" \
         "radium226_vpn_passthrough_ipc-*.whl" \
@@ -94,11 +94,14 @@ package_vpn-passthrough-cli() {
     install -Dm644 "$srcdir/vpn-passthrough.tmpfiles" \
         "$pkgdir/usr/lib/tmpfiles.d/vpn-passthrough.conf"
 
-    # Generate default config using the installed CLI.
+    # Generate default config files using the installed CLI.
     _site_packages=$(python -c "import sysconfig; print(sysconfig.get_path('purelib'))")
     PYTHONPATH="${pkgdir}${_site_packages}" \
-        python "${pkgdir}/usr/bin/vpn-passthrough" --skip-user-config show-config --empty \
-        | install -Dm644 /dev/stdin "${pkgdir}/etc/vpn-passthrough/config.yaml"
+        python "${pkgdir}/usr/bin/vpn-passthrough" --skip-user-config show-config --empty --server-only \
+        | install -Dm644 /dev/stdin "${pkgdir}/etc/vpn-passthrough/server.yaml"
+    PYTHONPATH="${pkgdir}${_site_packages}" \
+        python "${pkgdir}/usr/bin/vpn-passthrough" --skip-user-config show-config --empty --client-only \
+        | install -Dm644 /dev/stdin "${pkgdir}/etc/vpn-passthrough/client.yaml"
 }
 
 package_vpn-passthrough-pia() {

@@ -18,7 +18,7 @@ class Server[RequestT: Request, EventT, ResponseT: Response]():
         framing: Framing = NullCharFraming(),
     ) -> None:
         self._socket_path = socket_path
-        self._handler_map: dict[type, RequestHandler[Any, Any, Any]] = {h.request_type: h for h in handlers}
+        self._handler_map: dict[type, RequestHandler[Any, Any, Any]] = {handler.request_type: handler for handler in handlers}
         self._codec = codec
         self._framing = framing
         self._connections: list[Connection] = []

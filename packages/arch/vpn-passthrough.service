@@ -3,7 +3,7 @@ Description=VPN Passthrough Daemon
 After=network.target
 
 [Service]
-Type=simple
+Type=notify
 NotifyAccess=main
 ExecStart=/usr/bin/vpn-passthrough start-server
 Restart=on-failure
