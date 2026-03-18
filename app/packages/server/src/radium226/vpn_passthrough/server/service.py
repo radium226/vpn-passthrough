@@ -16,6 +16,7 @@ from loguru import logger
 from radium226.vpn_passthrough.ipc.protocol import Emit
 
 from radium226.vpn_passthrough.messages import (
+    BackendInfo,
     CommandNotFound,
     ConfigUsed,
     ConnectedToVPN,
@@ -50,9 +51,33 @@ from .dns_leak_guard import DNSLeakGuard
 from .internet import Internet
 from .namespace import Namespace
 from .network_interfaces import NetworkInterfaces
+from .vpeer_port_forward import VpeerPortForward
 from .linux import make_preexec_fn
 
 _MIN_RESTART_INTERVAL = 1.0  # seconds — prevent tight restart loops
+
+
+@dataclass
+class BackendConfig:
+    name: str
+    type: str
+    credentials: dict[str, str]
+
+    @classmethod
+    def load(cls, name: str, backends_folder_path: Path) -> "BackendConfig":
+        import yaml
+        path = backends_folder_path / f"{name}.yaml"
+        if not path.exists():
+            raise LookupError(f"Backend {name!r} not configured (expected {path})")
+        with path.open() as f:
+            data = yaml.safe_load(f) or {}
+        return cls(name=name, type=data["type"], credentials=data.get("credentials", {}))
+
+    @classmethod
+    def load_all(cls, backends_folder_path: Path) -> list["BackendConfig"]:
+        if not backends_folder_path.exists():
+            return []
+        return [cls.load(path.stem, backends_folder_path) for path in sorted(backends_folder_path.glob("*.yaml"))]
 
 
 @dataclass
@@ -61,6 +86,10 @@ class _TunnelContext:
     gateway_ip: str
     tun_ip: str
     forwarded_ports: dict[str, int]
+    veth: str = ""
+    veth_addr: str = ""
+    vpeer: str = ""
+    vpeer_addr: str = ""
     region_id: str | None = None
     forward_port: Callable[[], AbstractAsyncContextManager[int]] | None = None
 
@@ -71,9 +100,13 @@ class Service():
         self,
         namespace_base_folder_path: Path,
         *,
+        backends: list[BackendInfo] | None = None,
+        default_backend_name: str | None = None,
         on_tunnels_changed: Callable[[list[TunnelInfo]], None] | None = None,
     ) -> None:
         self.namespace_base_folder_path = namespace_base_folder_path
+        self._backends: list[BackendInfo] = backends or []
+        self._default_backend_name = default_backend_name
         self.exit_stacks: dict[TunnelName, AsyncExitStack] = {}
         self.namespaces: dict[TunnelName, Namespace] = {}
         self.tunnel_contexts: dict[TunnelName, _TunnelContext] = {}
@@ -89,9 +122,11 @@ class Service():
         cls,
         *,
         namespace_base_folder_path: Path,
+        backends: list[BackendInfo] | None = None,
+        default_backend_name: str | None = None,
         on_tunnels_changed: Callable[[list[TunnelInfo]], None] | None = None,
     ) -> AsyncIterator["Service"]:
-        yield Service(namespace_base_folder_path, on_tunnels_changed=on_tunnels_changed)
+        yield Service(namespace_base_folder_path, backends=backends, default_backend_name=default_backend_name, on_tunnels_changed=on_tunnels_changed)
 
     def _current_tunnels(self) -> list[TunnelInfo]:
         tunnels = []
@@ -106,6 +141,10 @@ class Service():
                 gateway_ip=ctx.gateway_ip if ctx is not None else None,
                 tun_ip=ctx.tun_ip if ctx is not None else None,
                 forwarded_ports=ctx.forwarded_ports if ctx is not None else {},
+                veth=ctx.veth if ctx is not None else None,
+                veth_addr=ctx.veth_addr if ctx is not None else None,
+                vpeer=ctx.vpeer if ctx is not None else None,
+                vpeer_addr=ctx.vpeer_addr if ctx is not None else None,
                 processes=procs,
             ))
         return tunnels
@@ -115,28 +154,40 @@ class Service():
             self._on_tunnels_changed(self._current_tunnels())
         emit_fn = self._tunnel_emit_fns.get(tunnel_name)
         if emit_fn is not None:
-            info = next((t for t in self._current_tunnels() if t.name == tunnel_name), None)
+            info = next((tunnel for tunnel in self._current_tunnels() if tunnel.name == tunnel_name), None)
             if info is not None:
                 await emit_fn(TunnelStatusUpdated(info=info), [])
+
+    def _resolve_backend(self, backend_name: str | None) -> tuple[Any, dict[str, str]]:
+        backend_name = backend_name or self._default_backend_name
+        if backend_name is None:
+            raise ValueError("backend_name is required to connect to VPN")
+        info = next((backend for backend in self._backends if backend.name == backend_name), None)
+        if info is None:
+            available = [backend.name for backend in self._backends]
+            raise LookupError(f"Backend {backend_name!r} not found. Available: {available}")
+        return get_backend(info.type), info.credentials
 
     async def _setup_tunnel(
         self,
         tunnel_name: TunnelName,
         region_id: str | None,
-        credentials: dict[str, str] | None,
         names_of_ports_to_forward: list[str],
         emit: Any,
-        backend: str | None = None,
+        backend_name: str | None = None,
+        veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] = [],
     ) -> None:
         self._tunnel_rebind_conditions[tunnel_name] = asyncio.Condition()
         stack = AsyncExitStack()
         try:
             namespace = await stack.enter_async_context(Namespace.create(tunnel_name, base_folder_path=self.namespace_base_folder_path))
-            network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace))
+            network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace, cidr=veth_cidr))
             await stack.enter_async_context(Internet.share(tunnel_name, network_interfaces))
+            await stack.enter_async_context(VpeerPortForward.setup(namespace, network_interfaces, ports_to_forward_from_vpeer_to_loopback))
 
-            if region_id is not None and credentials is not None:
-                backend_instance = get_backend(backend or "pia")
+            if region_id is not None and (backend_name is not None or self._default_backend_name is not None):
+                backend_instance, credentials = self._resolve_backend(backend_name)
                 session = await stack.enter_async_context(
                     backend_instance.connect(
                         tunnel_name,
@@ -164,12 +215,26 @@ class Service():
                     gateway_ip=session.gateway_ip,
                     tun_ip=session.tun_ip,
                     forwarded_ports=forwarded_ports,
+                    veth=network_interfaces.veth,
+                    veth_addr=network_interfaces.veth_addr,
+                    vpeer=network_interfaces.vpeer,
+                    vpeer_addr=network_interfaces.vpeer_addr,
                     region_id=region_id,
                     forward_port=session.forward_port,
                 )
             else:
                 await stack.enter_async_context(DNS.setup(namespace, nameservers=None))
                 await emit(DNSConfigured(nameservers=[]), [])
+                self.tunnel_contexts[tunnel_name] = _TunnelContext(
+                    public_ip="",
+                    gateway_ip="",
+                    tun_ip="",
+                    forwarded_ports={},
+                    veth=network_interfaces.veth,
+                    veth_addr=network_interfaces.veth_addr,
+                    vpeer=network_interfaces.vpeer,
+                    vpeer_addr=network_interfaces.vpeer_addr,
+                )
 
             self.namespaces[tunnel_name] = namespace
             self.exit_stacks[tunnel_name] = stack
@@ -191,15 +256,15 @@ class Service():
         stdin_fd, stdout_fd, stderr_fd = fds[0], fds[1], fds[2]
         kill_signal = request.kill_with or signal.SIGTERM
 
-        if request.in_tunnel is None:
-            raise ValueError("RunProcess requires in_tunnel")
+        if request.tunnel_name is None:
+            raise ValueError("RunProcess requires tunnel_name")
         if request.username is None:
             raise ValueError("RunProcess requires username")
 
-        tunnel_name = request.in_tunnel.name
+        tunnel_name = request.tunnel_name
         if tunnel_name not in self.namespaces:
             logger.info("Lazily creating tunnel {} for process", tunnel_name)
-            await self._setup_tunnel(tunnel_name, None, None, [], emit)
+            await self._setup_tunnel(tunnel_name, None, [], emit)
 
         namespace = self.namespaces[tunnel_name]
 
@@ -210,7 +275,6 @@ class Service():
         )
 
         first = True
-        tunnel_name = request.in_tunnel.name
         self.processes.setdefault(tunnel_name, {})
 
         while True:
@@ -220,6 +284,10 @@ class Service():
                 "gateway_ip": ctx.gateway_ip if ctx is not None else "",
                 "tun_ip": ctx.tun_ip if ctx is not None else "",
                 "forwarded_ports": ctx.forwarded_ports if ctx is not None else {},
+                "veth": ctx.veth if ctx is not None else "",
+                "veth_addr": ctx.veth_addr if ctx is not None else "",
+                "vpeer": ctx.vpeer if ctx is not None else "",
+                "vpeer_addr": ctx.vpeer_addr if ctx is not None else "",
             }
             try:
                 command = Template(request.command).render(**jinja_vars)
@@ -232,6 +300,52 @@ class Service():
                     except OSError as close_err:
                         logger.warning("Failed to close fd {}: {}", fd, close_err)
                 return CommandNotFound(request_id=request.id, command=request.command), []
+
+            if request.configure_with is not None:
+                payload = {
+                    "first": first,
+                    "public_ip": ctx.public_ip if ctx is not None else None,
+                    "gateway_ip": ctx.gateway_ip if ctx is not None else None,
+                    "tun_ip": ctx.tun_ip if ctx is not None else None,
+                    "forwarded_ports": ctx.forwarded_ports if ctx is not None else {},
+                    "veth": ctx.veth if ctx is not None else None,
+                    "veth_addr": ctx.veth_addr if ctx is not None else None,
+                    "vpeer": ctx.vpeer if ctx is not None else None,
+                    "vpeer_addr": ctx.vpeer_addr if ctx is not None else None,
+                }
+                try:
+                    configure_proc = await asyncio.create_subprocess_exec(
+                        request.configure_with,
+                        stdin=asyncio.subprocess.PIPE,
+                    )
+                    await configure_proc.communicate(json.dumps(payload).encode())
+                    if configure_proc.returncode != 0:
+                        def _close_fds() -> None:
+                            for fd in (stdin_fd, stdout_fd, stderr_fd):
+                                try:
+                                    os.close(fd)
+                                except OSError as close_err:
+                                    logger.warning("Failed to close fd {}: {}", fd, close_err)
+                        if first:
+                            logger.error(
+                                "configure-with script {} failed on first start (exit code {}), aborting",
+                                request.configure_with,
+                                configure_proc.returncode,
+                            )
+                            _close_fds()
+                            return ProcessTerminated(request_id=request.id, exit_code=configure_proc.returncode or 1), []
+                        else:
+                            logger.info(
+                                "configure-with script {} returned {}, not restarting process",
+                                request.configure_with,
+                                configure_proc.returncode,
+                            )
+                            _close_fds()
+                            return ProcessTerminated(request_id=request.id, exit_code=0), []
+                except FileNotFoundError:
+                    logger.error("configure-with script not found: {}", request.configure_with)
+                except Exception as e:
+                    logger.error("configure-with script failed: {}", e)
 
             try:
                 process = await asyncio.create_subprocess_exec(
@@ -280,30 +394,6 @@ class Service():
                     await self._notify_tunnel_updated(tunnel_name)
                     os.killpg(os.getpgid(process.pid), kill_signal)
                     await process.wait()
-                    if request.configure_with is not None:
-                        ctx = self.tunnel_contexts.get(tunnel_name)
-                        payload = {
-                            "public_ip": ctx.public_ip if ctx is not None else None,
-                            "gateway_ip": ctx.gateway_ip if ctx is not None else None,
-                            "tun_ip": ctx.tun_ip if ctx is not None else None,
-                            "forwarded_ports": ctx.forwarded_ports if ctx is not None else {},
-                        }
-                        try:
-                            configure_proc = await asyncio.create_subprocess_exec(
-                                request.configure_with,
-                                stdin=asyncio.subprocess.PIPE,
-                            )
-                            await configure_proc.communicate(json.dumps(payload).encode())
-                            if configure_proc.returncode != 0:
-                                logger.warning(
-                                    "configure-with script {} exited with code {}",
-                                    request.configure_with,
-                                    configure_proc.returncode,
-                                )
-                        except FileNotFoundError:
-                            logger.error("configure-with script not found: {}", request.configure_with)
-                        except Exception as e:
-                            logger.error("configure-with script failed: {}", e)
                     continue
                 else:
                     break
@@ -359,11 +449,12 @@ class Service():
         fds: list[int],
         emit: Emit[ConnectedToVPN | DNSConfigured],
     ) -> tuple[TunnelCreated, list[int]]:
-        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.names_of_ports_to_forward, emit, backend=request.backend)
+        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
         logger.info("Tunnel {} created", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
-        return TunnelCreated(request_id=request.id, name=request.name), []
+        tunnel_info = next((tunnel for tunnel in self._current_tunnels() if tunnel.name == request.name), TunnelInfo(name=request.name))
+        return TunnelCreated(request_id=request.id, name=request.name, tunnel=tunnel_info), []
 
     async def handle_start_tunnel(
         self,
@@ -373,11 +464,10 @@ class Service():
     ) -> tuple[TunnelStopped, list[int]]:
         await emit(ConfigUsed(
             region_id=request.region_id,
-            backend=request.backend,
+            backend_name=request.backend_name,
             names_of_ports_to_forward=request.names_of_ports_to_forward,
-            credentials=request.credentials,
         ), [])
-        await self._setup_tunnel(request.name, request.region_id, request.credentials, request.names_of_ports_to_forward, emit, backend=request.backend)
+        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
         logger.info("Tunnel {} started", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
@@ -407,6 +497,10 @@ class Service():
                         gateway_ip=ctx.gateway_ip,
                         tun_ip=ctx.tun_ip,
                         forwarded_ports=new_ports,
+                        veth=ctx.veth,
+                        veth_addr=ctx.veth_addr,
+                        vpeer=ctx.vpeer,
+                        vpeer_addr=ctx.vpeer_addr,
                         region_id=ctx.region_id,
                         forward_port=ctx.forward_port,
                     )
@@ -466,7 +560,7 @@ class Service():
         fds: list[int],
         emit: Emit[Never],
     ) -> tuple[RegionsListed, list[int]]:
-        backend_instance = get_backend(request.backend or "pia")
+        backend_instance, _ = self._resolve_backend(request.backend_name)
         regions = await backend_instance.list_regions()
         countries = [
             Country(region_id=region.id, name=region.name, country=region.country, port_forward=region.port_forward)

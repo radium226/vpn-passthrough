@@ -52,20 +52,20 @@ class Client[RequestT: Request, EventT, ResponseT: Response]():
         if event_type is None:
             return
         event_type = _resolve_type(event_type, type(request))
-        for t in _flatten_event_types(event_type):
-            self._event_routing.setdefault(t, []).append(request_id)
+        for event_type_class in _flatten_event_types(event_type):
+            self._event_routing.setdefault(event_type_class, []).append(request_id)
 
     def _unregister_event_routing(self, request_id: str, request: RequestT) -> None:
         event_type = getattr(request.__class__, "__event_type__", None)
         if event_type is None:
             return
         event_type = _resolve_type(event_type, type(request))
-        for t in _flatten_event_types(event_type):
-            lst = self._event_routing.get(t)
+        for event_type_class in _flatten_event_types(event_type):
+            lst = self._event_routing.get(event_type_class)
             if lst is not None:
                 lst[:] = [rid for rid in lst if rid != request_id]
                 if not lst:
-                    del self._event_routing[t]
+                    del self._event_routing[event_type_class]
 
     async def request(
         self,

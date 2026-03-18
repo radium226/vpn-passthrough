@@ -1,0 +1,127 @@
+# Maintainer: radium226 <radium226@rouages.xyz>
+pkgbase=vpn-passthrough
+pkgname=('vpn-passthrough-cli' 'vpn-passthrough-pia' 'vpn-passthrough-dummy')
+pkgver=0.1.0
+pkgrel=1
+arch=('x86_64')
+url="https://github.com/radium226/vpn-passthrough"
+license=('MIT')
+makedepends=('uv' 'python-installer' 'python-wheel' 'python-build' 'python-uv-build')
+
+# For AUR: replace with the real git URL.
+# For local builds: the PKGBUILD uses the parent workspace directly (no source download).
+source=(
+    "vpn-passthrough.service"
+    "vpn-passthrough@.service"
+    "vpn-passthrough.socket"
+    "vpn-passthrough.sysusers"
+    "vpn-passthrough.tmpfiles"
+    "radium226_vpn_passthrough_app-0.1.0.tar.gz"
+    "radium226_vpn_passthrough_messages-0.1.0.tar.gz"
+    "radium226_vpn_passthrough_client-0.1.0.tar.gz"
+    "radium226_vpn_passthrough_server-0.1.0.tar.gz"
+    "radium226_vpn_passthrough_ipc-0.1.0.tar.gz"
+    "radium226_vpn_passthrough_vpn-0.1.0.tar.gz"
+    "radium226_vpn_passthrough_pia-0.1.0.tar.gz"
+    "radium226_vpn_passthrough_dummy-0.1.0.tar.gz"
+)
+sha256sums=(
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+    "SKIP"
+)
+
+build() {
+    find "${srcdir}" -mindepth 1 -maxdepth 1 -type "d" -exec sh -c '
+        cd "${0}"
+        python -m build --wheel --no-isolation
+    ' "{}" "${srcdir}" \;
+}
+
+_install_wheels() {
+    local destdir="${1}"
+    shift
+    for pattern in "$@"; do
+        find "${srcdir}" -type f -name "${pattern}" \
+            -exec python -m installer --destdir="${destdir}" {} \;
+    done
+}
+
+package_vpn-passthrough-cli() {
+    pkgdesc="VPN passthrough CLI and server daemon"
+    depends=(
+        'python'
+        'python-click'
+        'python-pydantic'
+        'python-loguru'
+        'python-prettytable'
+        'python-jinja'
+        'python-yaml'
+        'iproute2'
+        'nftables'
+        'curl'
+    )
+    optdepends=('python-capng: ambient capabilities support')
+    install=vpn-passthrough.install
+    backup=('etc/vpn-passthrough/server.yaml' 'etc/vpn-passthrough/client.yaml')
+
+    _install_wheels "${pkgdir}" \
+        "radium226_vpn_passthrough_ipc-*.whl" \
+        "radium226_vpn_passthrough_messages-*.whl" \
+        "radium226_vpn_passthrough_client-*.whl" \
+        "radium226_vpn_passthrough_server-*.whl" \
+        "radium226_vpn_passthrough_vpn-*.whl" \
+        "radium226_vpn_passthrough_app-*.whl"
+
+    install -Dm644 "$srcdir/vpn-passthrough.service" \
+        "$pkgdir/usr/lib/systemd/system/vpn-passthrough.service"
+    install -Dm644 "$srcdir/vpn-passthrough@.service" \
+        "$pkgdir/usr/lib/systemd/system/vpn-passthrough@.service"
+    install -Dm644 "$srcdir/vpn-passthrough.socket" \
+        "$pkgdir/usr/lib/systemd/system/vpn-passthrough.socket"
+    install -Dm644 "$srcdir/vpn-passthrough.sysusers" \
+        "$pkgdir/usr/lib/sysusers.d/vpn-passthrough.conf"
+    install -Dm644 "$srcdir/vpn-passthrough.tmpfiles" \
+        "$pkgdir/usr/lib/tmpfiles.d/vpn-passthrough.conf"
+
+    # Generate default config files using the installed CLI.
+    _site_packages=$(python -c "import sysconfig; print(sysconfig.get_path('purelib'))")
+    PYTHONPATH="${pkgdir}${_site_packages}" \
+        python "${pkgdir}/usr/bin/vpn-passthrough" show-config --empty --server-only \
+        | install -Dm644 /dev/stdin "${pkgdir}/etc/vpn-passthrough/server.yaml"
+    PYTHONPATH="${pkgdir}${_site_packages}" \
+        python "${pkgdir}/usr/bin/vpn-passthrough" show-config --empty --client-only \
+        | install -Dm644 /dev/stdin "${pkgdir}/etc/vpn-passthrough/client.yaml"
+}
+
+package_vpn-passthrough-pia() {
+    pkgdesc="PIA VPN backend for vpn-passthrough"
+    depends=(
+        "vpn-passthrough-cli=${pkgver}"
+        'python-httpx'
+        'openvpn'
+    )
+
+    _install_wheels "${pkgdir}" \
+        "radium226_vpn_passthrough_pia-*.whl"
+}
+
+package_vpn-passthrough-dummy() {
+    pkgdesc="Dummy VPN backend for vpn-passthrough (for testing)"
+    depends=(
+        "vpn-passthrough-cli=${pkgver}"
+    )
+
+    _install_wheels "${pkgdir}" \
+        "radium226_vpn_passthrough_dummy-*.whl"
+}

@@ -2,7 +2,7 @@
 name = "radium226-vpn-passthrough-client"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = ["loguru", "radium226-vpn-passthrough-messages", "radium226-vpn-passthrough-ipc"]
+dependencies = ["loguru", "pyyaml", "radium226-vpn-passthrough-messages", "radium226-vpn-passthrough-ipc"]
 
 [build-system]
 requires = ["uv_build>=0.10.3,<0.11.0"]

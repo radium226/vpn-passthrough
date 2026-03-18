@@ -1,0 +1,5 @@
+socket: /run/vpn-passthrough/ipc.socket
+
+# PIA VPN credentials (can be overridden per-command with --vpn-user / --vpn-password)
+# vpn_username: your_username
+# vpn_password: your_password

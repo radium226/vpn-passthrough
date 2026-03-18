@@ -1,10 +1,13 @@
 import asyncio
 import getpass
 import os
+import random
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator, Awaitable, Callable, Never
+from typing import AsyncIterator, Awaitable, Callable, Never, overload
+
+from .config import ClientConfig, TunnelConfig
 
 from loguru import logger
 
@@ -31,7 +34,6 @@ from radium226.vpn_passthrough.messages import (
     ProcessTerminated,
     RunProcess,
     StartTunnel,
-    Tunnel,
     TunnelCreated,
     TunnelDestroyed,
     TunnelInfo,
@@ -43,16 +45,31 @@ from radium226.vpn_passthrough.messages import (
 
 
 class Client:
+    ipc: IPCClient
+    _tunnel_watch_tasks: dict[str, asyncio.Task[None]]
     def __init__(self, ipc: IPCClient) -> None:
         self.ipc = ipc
         self._tunnel_watch_tasks: dict[str, asyncio.Task[None]] = {}
 
-    @classmethod
+    @staticmethod
     @asynccontextmanager
-    async def connect(cls, socket_file_path: Path) -> AsyncIterator["Client"]:
-        logger.debug("Connecting to {}", socket_file_path)
+    async def _connect(socket_file_path: Path) -> AsyncIterator["Client"]:
         async with IPCClient.connect(socket_file_path, CODEC) as ipc:
-            yield cls(ipc)
+            yield Client(ipc)
+
+    @overload
+    @classmethod
+    def connect(cls, config: ClientConfig) -> AbstractAsyncContextManager["Client"]: ...
+
+    @overload
+    @classmethod
+    def connect(cls, socket_file_path: Path) -> AbstractAsyncContextManager["Client"]: ...
+
+    @classmethod
+    def connect(cls, config: ClientConfig | Path) -> AbstractAsyncContextManager["Client"]:
+        if isinstance(config, Path):
+            config = ClientConfig(socket_file_path=config)
+        return cls._connect(config.socket_file_path)
 
     async def run_process(
         self,
@@ -61,7 +78,7 @@ class Client:
         *,
         fds: list[int] | None = None,
         kill_with: int | None = None,
-        in_tunnel: Tunnel | None = None,
+        tunnel_name: str | None = None,
         cwd: str | None = None,
         username: str | None = None,
         gid: int | None = None,
@@ -95,7 +112,7 @@ class Client:
                 command=command,
                 args=args or [],
                 kill_with=kill_with,
-                in_tunnel=in_tunnel,
+                tunnel_name=tunnel_name,
                 cwd=cwd,
                 username=username or getpass.getuser(),
                 gid=gid,
@@ -127,16 +144,48 @@ class Client:
 
         await done
 
+    @overload
+    async def create_tunnel(self, config: TunnelConfig) -> TunnelCreated: ...
+
+    @overload
     async def create_tunnel(
         self,
         name: str,
         *,
         region_id: str | None = None,
-        credentials: dict[str, str] | None = None,
         names_of_ports_to_forward: list[str] | None = None,
-        backend: str | None = None,
-        on_tunnel_info_changed: Callable[[TunnelInfo], None] | None = None,
+        backend_name: str | None = None,
+        veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
+    ) -> TunnelCreated: ...
+
+    async def create_tunnel(
+        self,
+        name_or_config: str | TunnelConfig,
+        *,
+        region_id: str | None = None,
+        names_of_ports_to_forward: list[str] | None = None,
+        backend_name: str | None = None,
+        veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
     ) -> TunnelCreated:
+        if isinstance(name_or_config, TunnelConfig):
+            config = name_or_config
+            name = config.name
+            region_id = config.region_id
+            names_of_ports_to_forward = config.names_of_ports_to_forward
+            backend_name = config.backend_name
+            veth_cidr = config.veth_cidr
+            ports_to_forward_from_vpeer_to_loopback = config.ports_to_forward_from_vpeer_to_loopback
+        else:
+            name = name_or_config
+
+        if region_id is None:
+            countries = await self.list_regions(backend_name=backend_name)
+            if names_of_ports_to_forward:
+                countries = [country for country in countries if country.port_forward]
+            region_id = random.choice(countries).region_id
+
         loop = asyncio.get_running_loop()
         result: asyncio.Future[TunnelCreated] = loop.create_future()
 
@@ -156,9 +205,10 @@ class Client:
                 id=str(uuid.uuid4()),
                 name=name,
                 region_id=region_id,
-                credentials=credentials,
                 names_of_ports_to_forward=names_of_ports_to_forward or [],
-                backend=backend,
+                backend_name=backend_name,
+                veth_cidr=veth_cidr,
+                ports_to_forward_from_vpeer_to_loopback=ports_to_forward_from_vpeer_to_loopback or [],
             ),
             handler=ResponseHandler[ConnectedToVPN | DNSConfigured, TunnelCreated](
                 on_event=on_event,
@@ -169,20 +219,58 @@ class Client:
 
         return await result
 
+    @overload
+    async def start_tunnel(self, config: TunnelConfig, *, on_ready: Callable[[], None] | None = None, on_config_used: Callable[[ConfigUsed], None] | None = None, on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None, on_ports_rebound: Callable[[PortsRebound], None] | None = None) -> None: ...
+
+    @overload
     async def start_tunnel(
         self,
         name: str,
         *,
         region_id: str | None = None,
-        credentials: dict[str, str] | None = None,
         names_of_ports_to_forward: list[str] | None = None,
-        backend: str | None = None,
+        backend_name: str | None = None,
         rebind_ports_every: float | None = None,
+        veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
+        on_ready: Callable[[], None] | None = None,
+        on_config_used: Callable[[ConfigUsed], None] | None = None,
+        on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None,
+        on_ports_rebound: Callable[[PortsRebound], None] | None = None,
+    ) -> None: ...
+
+    async def start_tunnel(
+        self,
+        name_or_config: str | TunnelConfig,
+        *,
+        region_id: str | None = None,
+        names_of_ports_to_forward: list[str] | None = None,
+        backend_name: str | None = None,
+        rebind_ports_every: float | None = None,
+        veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
         on_ready: Callable[[], None] | None = None,
         on_config_used: Callable[[ConfigUsed], None] | None = None,
         on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None,
         on_ports_rebound: Callable[[PortsRebound], None] | None = None,
     ) -> None:
+        if isinstance(name_or_config, TunnelConfig):
+            config = name_or_config
+            name = config.name
+            region_id = config.region_id
+            names_of_ports_to_forward = config.names_of_ports_to_forward
+            backend_name = config.backend_name
+            veth_cidr = config.veth_cidr
+            rebind_ports_every = config.rebind_ports_every
+            ports_to_forward_from_vpeer_to_loopback = config.ports_to_forward_from_vpeer_to_loopback
+        else:
+            name = name_or_config
+
+        if region_id is None:
+            countries = await self.list_regions(backend_name=backend_name)
+            if names_of_ports_to_forward:
+                countries = [country for country in countries if country.port_forward]
+            region_id = random.choice(countries).region_id
         loop = asyncio.get_running_loop()
         done: asyncio.Future[None] = loop.create_future()
 
@@ -216,10 +304,11 @@ class Client:
                 id=str(uuid.uuid4()),
                 name=name,
                 region_id=region_id,
-                credentials=credentials,
                 names_of_ports_to_forward=names_of_ports_to_forward or [],
-                backend=backend,
+                backend_name=backend_name,
                 rebind_ports_every=rebind_ports_every,
+                veth_cidr=veth_cidr,
+                ports_to_forward_from_vpeer_to_loopback=ports_to_forward_from_vpeer_to_loopback or [],
             ),
             handler=ResponseHandler[ConfigUsed | TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated | PortsRebound, TunnelStopped](
                 on_event=on_event,
@@ -230,7 +319,7 @@ class Client:
 
         await done
 
-    async def list_regions(self, *, backend: str | None = None) -> list[Country]:
+    async def list_regions(self, *, backend_name: str | None = None) -> list[Country]:
         loop = asyncio.get_running_loop()
         result: asyncio.Future[list[Country]] = loop.create_future()
 
@@ -238,7 +327,7 @@ class Client:
             result.set_result(response.countries)
 
         await self.ipc.request(
-            ListRegions(id=str(uuid.uuid4()), backend=backend),
+            ListRegions(id=str(uuid.uuid4()), backend_name=backend_name),
             handler=ResponseHandler[Never, RegionsListed](on_response=on_response),
             fds=[],
         )
@@ -259,6 +348,13 @@ class Client:
         )
 
         return await result
+
+    async def lookup_tunnel(self, name: str) -> TunnelInfo:
+        tunnels = await self.list_tunnels()
+        info = next((tunnel for tunnel in tunnels if tunnel.name == name), None)
+        if info is None:
+            raise KeyError(f"Tunnel {name!r} not found")
+        return info
 
     async def destroy_tunnel(self, name: str) -> None:
         loop = asyncio.get_running_loop()

@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+
+set -euEo pipefail
+
+find_packages()
+{
+    local root arch_dir pkgnames
+    root="$(git rev-parse --show-toplevel)"
+    arch_dir="${root}/packages/arch"
+
+    pkgnames="$(grep -E '^pkgname=' "${arch_dir}/PKGBUILD" | sed "s/^pkgname=//; s/[()'\"]//g")"
+
+    for pkg_file in "${arch_dir}"/*.pkg.tar.zst; do
+        [ -f "${pkg_file}" ] || continue
+        local basename
+        basename="$(basename "${pkg_file}")"
+        for name in ${pkgnames}; do
+            if [[ "${basename}" == "${name}-"* ]]; then
+                echo "${pkg_file}"
+                break
+            fi
+        done
+    done
+}
+
+install_packages()
+{
+    local private_key_file
+    private_key_file="$(mktemp)"
+    trap "rm -f '${private_key_file}'" EXIT
+    chmod 600 "${private_key_file}"
+    printf "%s" "${PRIVATE_SSH_KEY}" >"${private_key_file}"
+
+    local ssh_opts=(
+        -i "${private_key_file}"
+        -o StrictHostKeyChecking=no
+        -o IdentitiesOnly=yes
+        -o UserKnownHostsFile=/dev/null
+        -o LogLevel=ERROR
+    )
+
+    local pkgs=()
+    while IFS= read -r pkg; do
+        pkgs+=("${pkg}")
+    done < <(find_packages)
+
+    if [[ ${#pkgs[@]} -eq 0 ]]; then
+        echo "No packages found in packages/arch — run package-for-arch-linux first." >&2
+        exit 1
+    fi
+
+    local remote_dir
+    remote_dir="$(ssh "${ssh_opts[@]}" "${REMOTE_USER}@${REMOTE_SERVER_HOST}" 'mktemp -d')"
+
+    echo "Uploading ${#pkgs[@]} package(s) to ${REMOTE_SERVER_HOST}:${remote_dir} ..."
+    for pkg in "${pkgs[@]}"; do
+        echo "  $(basename "${pkg}")"
+        scp "${ssh_opts[@]}" "${pkg}" "${REMOTE_USER}@${REMOTE_SERVER_HOST}:${remote_dir}/"
+    done
+
+    echo "Installing packages on ${REMOTE_SERVER_HOST} ..."
+    ssh "${ssh_opts[@]}" "${REMOTE_USER}@${REMOTE_SERVER_HOST}" \
+        "trap 'rm -rf ${remote_dir}' EXIT; sudo pacman -U --noconfirm ${remote_dir}/*.pkg.tar.zst"
+}
+
+main()
+{
+    local root
+    root="$(git rev-parse --show-toplevel)"
+
+    if [[ -z "${REMOTE_SERVER_HOST:-}" ]]; then
+        exec uvx \
+            --from="git+https://github.com/radium226/variables.git" \
+                variables \
+                    exec \
+                        -v "${root}/variables.yaml" \
+                        -- \
+                            bash "${BASH_SOURCE[0]}"
+    fi
+
+    install_packages
+}
+
+main "${@}"

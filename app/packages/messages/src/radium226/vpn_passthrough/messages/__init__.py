@@ -10,10 +10,6 @@ type TunnelName = str
 type RequestID = str
 
 
-class Tunnel(BaseModel):
-    name: TunnelName
-
-
 class ProcessTerminated(BaseModel):
     request_id: RequestID
     exit_code: int
@@ -42,7 +38,7 @@ class RunProcess(BaseModel, Request[ProcessTerminated | CommandNotFound, Process
     command: str
     args: list[str] = []
     kill_with: int | None = None
-    in_tunnel: Tunnel | None = None
+    tunnel_name: str | None = None
     cwd: str | None = None
     username: str | None = None
     gid: int | None = None
@@ -66,9 +62,37 @@ class KillProcess(BaseModel, Request[ProcessKilled, Never]):
     type: Literal["kill_process"] = "kill_process"
 
 
+class ProcessInfo(BaseModel):
+    pid: int
+    command: str
+    args: list[str] = []
+
+
+class BackendInfo(BaseModel):
+    name: str
+    type: str
+    credentials: dict[str, str] = {}
+
+
+class TunnelInfo(BaseModel):
+    name: str
+    vpn_connected: bool = False
+    region_id: str | None = None
+    public_ip: str | None = None
+    gateway_ip: str | None = None
+    tun_ip: str | None = None
+    forwarded_ports: dict[str, int] = {}
+    veth: str | None = None
+    veth_addr: str | None = None
+    vpeer: str | None = None
+    vpeer_addr: str | None = None
+    processes: list[ProcessInfo] = []
+
+
 class TunnelCreated(BaseModel):
     request_id: str
     name: str
+    tunnel: TunnelInfo
     type: Literal["tunnel_created"] = "tunnel_created"
 
 
@@ -95,17 +119,17 @@ class CreateTunnel(BaseModel, Request[TunnelCreated, ConnectedToVPN | DNSConfigu
     id: str
     name: str
     region_id: str | None = None
-    credentials: dict[str, str] | None = None
     names_of_ports_to_forward: list[str] = []
-    backend: str | None = None
+    backend_name: str | None = None
+    veth_cidr: str | None = None
+    ports_to_forward_from_vpeer_to_loopback: list[int] = []
     type: Literal["create_tunnel"] = "create_tunnel"
 
 
 class ConfigUsed(BaseModel):
     region_id: str | None
-    backend: str | None
+    backend_name: str | None
     names_of_ports_to_forward: list[str]
-    credentials: dict[str, str] | None
     type: Literal["config_used"] = "config_used"
 
 
@@ -115,7 +139,7 @@ class TunnelStarted(BaseModel):
 
 
 class TunnelStatusUpdated(BaseModel):
-    info: "TunnelInfo"
+    info: TunnelInfo
     type: Literal["tunnel_status_updated"] = "tunnel_status_updated"
 
 
@@ -134,10 +158,11 @@ class StartTunnel(BaseModel, Request["TunnelStopped", "ConfigUsed | TunnelStarte
     id: str
     name: str
     region_id: str | None = None
-    credentials: dict[str, str] | None = None
     names_of_ports_to_forward: list[str] = []
-    backend: str | None = None
+    backend_name: str | None = None
     rebind_ports_every: float | None = None
+    veth_cidr: str | None = None
+    ports_to_forward_from_vpeer_to_loopback: list[int] = []
     type: Literal["start_tunnel"] = "start_tunnel"
 
 
@@ -162,25 +187,8 @@ class RegionsListed(BaseModel):
 
 class ListRegions(BaseModel, Request[RegionsListed, Never]):
     id: str
-    backend: str | None = None
+    backend_name: str | None = None
     type: Literal["list_regions"] = "list_regions"
-
-
-class ProcessInfo(BaseModel):
-    pid: int
-    command: str
-    args: list[str] = []
-
-
-class TunnelInfo(BaseModel):
-    name: str
-    vpn_connected: bool = False
-    region_id: str | None = None
-    public_ip: str | None = None
-    gateway_ip: str | None = None
-    tun_ip: str | None = None
-    forwarded_ports: dict[str, int] = {}
-    processes: list[ProcessInfo] = []
 
 
 class TunnelsListed(BaseModel):
