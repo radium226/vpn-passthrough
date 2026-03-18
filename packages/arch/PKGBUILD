@@ -97,10 +97,10 @@ package_vpn-passthrough-cli() {
     # Generate default config files using the installed CLI.
     _site_packages=$(python -c "import sysconfig; print(sysconfig.get_path('purelib'))")
     PYTHONPATH="${pkgdir}${_site_packages}" \
-        python "${pkgdir}/usr/bin/vpn-passthrough" --skip-user-config show-config --empty --server-only \
+        python "${pkgdir}/usr/bin/vpn-passthrough" show-config --empty --server-only \
         | install -Dm644 /dev/stdin "${pkgdir}/etc/vpn-passthrough/server.yaml"
     PYTHONPATH="${pkgdir}${_site_packages}" \
-        python "${pkgdir}/usr/bin/vpn-passthrough" --skip-user-config show-config --empty --client-only \
+        python "${pkgdir}/usr/bin/vpn-passthrough" show-config --empty --client-only \
         | install -Dm644 /dev/stdin "${pkgdir}/etc/vpn-passthrough/client.yaml"
 }
 

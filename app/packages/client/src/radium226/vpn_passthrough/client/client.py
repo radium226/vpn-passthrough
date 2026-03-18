@@ -156,6 +156,7 @@ class Client:
         names_of_ports_to_forward: list[str] | None = None,
         backend_name: str | None = None,
         veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
     ) -> TunnelCreated: ...
 
     async def create_tunnel(
@@ -166,6 +167,7 @@ class Client:
         names_of_ports_to_forward: list[str] | None = None,
         backend_name: str | None = None,
         veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
     ) -> TunnelCreated:
         if isinstance(name_or_config, TunnelConfig):
             config = name_or_config
@@ -174,6 +176,7 @@ class Client:
             names_of_ports_to_forward = config.names_of_ports_to_forward
             backend_name = config.backend_name
             veth_cidr = config.veth_cidr
+            ports_to_forward_from_vpeer_to_loopback = config.ports_to_forward_from_vpeer_to_loopback
         else:
             name = name_or_config
 
@@ -205,6 +208,7 @@ class Client:
                 names_of_ports_to_forward=names_of_ports_to_forward or [],
                 backend_name=backend_name,
                 veth_cidr=veth_cidr,
+                ports_to_forward_from_vpeer_to_loopback=ports_to_forward_from_vpeer_to_loopback or [],
             ),
             handler=ResponseHandler[ConnectedToVPN | DNSConfigured, TunnelCreated](
                 on_event=on_event,
@@ -228,6 +232,7 @@ class Client:
         backend_name: str | None = None,
         rebind_ports_every: float | None = None,
         veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
         on_ready: Callable[[], None] | None = None,
         on_config_used: Callable[[ConfigUsed], None] | None = None,
         on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None,
@@ -243,6 +248,7 @@ class Client:
         backend_name: str | None = None,
         rebind_ports_every: float | None = None,
         veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
         on_ready: Callable[[], None] | None = None,
         on_config_used: Callable[[ConfigUsed], None] | None = None,
         on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None,
@@ -256,6 +262,7 @@ class Client:
             backend_name = config.backend_name
             veth_cidr = config.veth_cidr
             rebind_ports_every = config.rebind_ports_every
+            ports_to_forward_from_vpeer_to_loopback = config.ports_to_forward_from_vpeer_to_loopback
         else:
             name = name_or_config
 
@@ -301,6 +308,7 @@ class Client:
                 backend_name=backend_name,
                 rebind_ports_every=rebind_ports_every,
                 veth_cidr=veth_cidr,
+                ports_to_forward_from_vpeer_to_loopback=ports_to_forward_from_vpeer_to_loopback or [],
             ),
             handler=ResponseHandler[ConfigUsed | TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated | PortsRebound, TunnelStopped](
                 on_event=on_event,

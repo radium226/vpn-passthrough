@@ -51,6 +51,7 @@ from .dns_leak_guard import DNSLeakGuard
 from .internet import Internet
 from .namespace import Namespace
 from .network_interfaces import NetworkInterfaces
+from .vpeer_port_forward import VpeerPortForward
 from .linux import make_preexec_fn
 
 _MIN_RESTART_INTERVAL = 1.0  # seconds — prevent tight restart loops
@@ -175,6 +176,7 @@ class Service():
         emit: Any,
         backend_name: str | None = None,
         veth_cidr: str | None = None,
+        ports_to_forward_from_vpeer_to_loopback: list[int] = [],
     ) -> None:
         self._tunnel_rebind_conditions[tunnel_name] = asyncio.Condition()
         stack = AsyncExitStack()
@@ -182,6 +184,7 @@ class Service():
             namespace = await stack.enter_async_context(Namespace.create(tunnel_name, base_folder_path=self.namespace_base_folder_path))
             network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace, cidr=veth_cidr))
             await stack.enter_async_context(Internet.share(tunnel_name, network_interfaces))
+            await stack.enter_async_context(VpeerPortForward.setup(namespace, network_interfaces, ports_to_forward_from_vpeer_to_loopback))
 
             if region_id is not None and (backend_name is not None or self._default_backend_name is not None):
                 backend_instance, credentials = self._resolve_backend(backend_name)
@@ -446,7 +449,7 @@ class Service():
         fds: list[int],
         emit: Emit[ConnectedToVPN | DNSConfigured],
     ) -> tuple[TunnelCreated, list[int]]:
-        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr)
+        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
         logger.info("Tunnel {} created", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
@@ -464,7 +467,7 @@ class Service():
             backend_name=request.backend_name,
             names_of_ports_to_forward=request.names_of_ports_to_forward,
         ), [])
-        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr)
+        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
         logger.info("Tunnel {} started", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())

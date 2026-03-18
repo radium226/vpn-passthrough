@@ -29,6 +29,7 @@ class TunnelConfig(BaseModel):
     backend_name: str | None = None
     veth_cidr: str | None = None
     rebind_ports_every: float | None = None
+    ports_to_forward_from_vpeer_to_loopback: list[int] = []
 
     @classmethod
     def load_all(cls, folder_path: Path | None = None) -> dict[str, "TunnelConfig"]:
