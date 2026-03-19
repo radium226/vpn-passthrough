@@ -36,6 +36,8 @@ def list_tunnels(config_folder_path: Path | None, output_format: str, with_proce
                             "public_ip": tunnel.public_ip,
                             "gateway_ip": tunnel.gateway_ip,
                             "tun_ip": tunnel.tun_ip,
+                            "veth_ip": tunnel.veth_ip,
+                            "vpeer_ip": tunnel.vpeer_ip,
                             "forwarded_ports": tunnel.forwarded_ports,
                             **({"processes": [{"pid": process.pid, "command": process.command, "args": process.args} for process in tunnel.processes]} if with_processes else {}),
                         }
@@ -44,7 +46,7 @@ def list_tunnels(config_folder_path: Path | None, output_format: str, with_proce
                     indent=2,
                 ))
             else:
-                fields = ["Name", "VPN", "Region", "Public IP", "Gateway IP", "Tun IP", "Forwarded Ports"]
+                fields = ["Name", "VPN", "Region", "Public IP", "Gateway IP", "Tun IP", "Veth IP", "Vpeer IP", "Forwarded Ports"]
                 if with_processes:
                     fields.append("Processes")
                 table = PrettyTable()
@@ -58,6 +60,8 @@ def list_tunnels(config_folder_path: Path | None, output_format: str, with_proce
                         tunnel.public_ip or "",
                         tunnel.gateway_ip or "",
                         tunnel.tun_ip or "",
+                        tunnel.veth_ip or "",
+                        tunnel.vpeer_ip or "",
                         ", ".join(f"{port_name}={port_number}" for port_name, port_number in tunnel.forwarded_ports.items()),
                     ]
                     if with_processes:

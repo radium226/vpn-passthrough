@@ -1,14 +1,14 @@
 # VPN Passthrough
 
 > [!IMPORTANT]
-> If you're watching this page from [the repo in GitHub](https://github.com/radium226/vpn-passthrough), please note it's only a read-only mirror from [the repo in SourceHut](https://git.sr.ht/~radium226/vpn-passthrough). 
+> If you're watching this page from [the repo in GitHub](https://github.com/radium226/vpn-passthrough), please note it's only a read-only mirror from [the repo in SourceHut](https://git.sr.ht/~radium226/vpn-passthrough).
 > You can follow the tickets in [this tracker](https://todo.sr.ht/~radium226/vpn-passthrough).
 
 A daemon-based system for executing commands inside isolated Linux network namespaces with optional VPN connectivity via Private Internet Access (PIA). Processes run in complete network isolation, with DNS leak prevention enforced at the kernel level.
 
 ## Overview
 
-`vpn-passthrough` solves the problem of running arbitrary processes through a VPN tunnel without affecting the host network. Each tunnel is an independent Linux network namespace connected to the host via a veth pair. When a PIA region is specified, the daemon establishes an OpenVPN connection inside the namespace, configures DNS, and optionally allocates forwarded ports — all transparently from the process's perspective.
+`vpn-passthrough` solves the problem of running arbitrary processes through a VPN tunnel without affecting the host network. Each tunnel is an independent Linux network namespace connected to the host via a veth pair. When a VPN backend is configured, the daemon establishes a VPN connection inside the namespace, configures DNS, and optionally allocates forwarded ports — all transparently from the process's perspective.
 
 Communication between the CLI and the daemon occurs over a Unix domain socket using a typed, correlated request/response/event protocol.
 
@@ -20,13 +20,13 @@ CLI (vpn-passthrough)
                                        └─► Service
                                              ├─ Network namespace (netns + veth)
                                              ├─ DNS leak guard (nftables)
-                                             ├─ VPN connection (OpenVPN + PIA)
+                                             ├─ VPN connection (pluggable backend)
                                              └─ Process management (fd passing)
 ```
 
 1. The daemon (`start-server`) listens on a Unix socket and manages named tunnels.
 2. A tunnel is a Linux network namespace with a veth pair, a dedicated `resolv.conf`, and nftables rules that block DNS queries on the veth interface (preventing leaks to the host resolver).
-3. When a PIA region is provided, OpenVPN is launched inside the namespace; once connected, the daemon emits `ConnectedToVPN` with the assigned IPs and forwarded ports.
+3. When a VPN backend is configured, a VPN connection is launched inside the namespace; once connected, the daemon emits `ConnectedToVPN` with the assigned IPs and forwarded ports.
 4. Processes run inside tunnels via `SCM_RIGHTS` file descriptor passing so that the process inherits the client's stdin/stdout/stderr over the socket boundary.
 5. Command and argument templates support Jinja2 variables (`public_ip`, `gateway_ip`, `tun_ip`, `forwarded_ports`) resolved from the tunnel context at spawn time.
 
@@ -39,12 +39,12 @@ cd packages/arch
 makepkg -si
 ```
 
-The package installs the `vpn-passthrough` binary, a systemd service and socket unit, `sysusers.d` and `tmpfiles.d` fragments, and a default configuration at `/etc/vpn-passthrough/config.yaml`.
+The package installs the `vpn-passthrough` binary, systemd service units, `sysusers.d` and `tmpfiles.d` fragments, and default configuration files at `/etc/vpn-passthrough/`.
 
 ### From Source
 
 ```bash
-cd packages/app
+cd app/packages/app
 uv sync
 uv run vpn-passthrough --help
 ```
@@ -53,31 +53,49 @@ uv run vpn-passthrough --help
 
 ## Configuration
 
-Configuration is merged from the following sources in order (later values override earlier ones):
+Configuration is folder-based. The default config folder is `/etc/vpn-passthrough` and contains:
 
-| Source | Path |
-|--------|------|
-| System config | `/etc/vpn-passthrough/config.yaml` |
-| User config | `~/.config/vpn-passthrough/config.yaml` |
-| CLI flag | `--config FILE` |
+| File | Purpose |
+|------|---------|
+| `server.yaml` | Server settings (socket path, namespace folder, backends folder, default backend) |
+| `client.yaml` | Client settings (socket path) |
+| `tunnels/*.yaml` | Per-tunnel configs (region, ports to forward, backend, veth CIDR, etc.) |
 
-**Available fields:**
+Override the config folder with `--config FOLDER` or the `VPN_PASSTHROUGH_CONFIG` environment variable.
+
+**Server config fields:**
 
 ```yaml
 socket_file_path: /run/vpn-passthrough/ipc.socket
 namespace_base_folder_path: /run/vpn-passthrough/namespaces
-vpn_user: null
-vpn_password: null
+backends_folder_path: /etc/vpn-passthrough/backends
+default_backend_name: null
+```
+
+**Client config fields:**
+
+```yaml
+socket_file_path: /run/vpn-passthrough/ipc.socket
+```
+
+**Tunnel config fields** (in `tunnels/<name>.yaml`):
+
+```yaml
 region_id: null
-number_of_ports_to_forward: 0
-port_rebind_every: 604800.0   # seconds (default: 1 week)
+names_of_ports_to_forward: []
+backend_name: null
+veth_cidr: null
+rebind_ports_every: null
+ports_to_forward_from_vpeer_to_loopback: []
 ```
 
 Print the current effective configuration:
 
 ```bash
 vpn-passthrough show-config
-vpn-passthrough show-config --empty   # print defaults
+vpn-passthrough show-config --empty          # print defaults
+vpn-passthrough show-config --server-only    # server section only
+vpn-passthrough show-config --client-only    # client section only
 ```
 
 ## Usage
@@ -97,10 +115,35 @@ sudo systemctl enable --now vpn-passthrough.service
 ### Global Options
 
 ```
---socket PATH        Unix socket path (env: VPN_PASSTHROUGH_SOCKET)
---config, -c FILE    Extra config file to merge
---skip-user-config   Skip the XDG user config file
+--config FOLDER    Config folder path (env: VPN_PASSTHROUGH_CONFIG)
 ```
+
+---
+
+### `start-tunnel NAME`
+
+Starts a tunnel and keeps it running. Sends `READY=1` to systemd when connected. Suitable for use as a systemd service. Tunnel config is loaded from `tunnels/<name>.yaml` in the config folder; CLI flags override config file values.
+
+```bash
+vpn-passthrough start-tunnel --region-id nl-amsterdam my-tunnel
+vpn-passthrough start-tunnel my-tunnel   # uses config from tunnels/my-tunnel.yaml
+```
+
+A per-tunnel systemd service template is provided:
+
+```bash
+# Reads config from /etc/vpn-passthrough/tunnels/my-tunnel.yaml
+sudo systemctl enable --now vpn-passthrough@my-tunnel.service
+```
+
+| Option | Description |
+|--------|-------------|
+| `--region-id REGION` | VPN region ID (env: `VPN_PASSTHROUGH_REGION_ID`) |
+| `--backend-name NAME` | Backend name (env: `VPN_PASSTHROUGH_BACKEND`) |
+| `--forward-port-for NAME` | Forward a port with the given name (repeatable) |
+| `--rebind-ports-every SECONDS` | Reallocate forwarded ports every N seconds |
+| `--veth-cidr CIDR` | Fixed CIDR for the veth pair (e.g. `10.200.5.0/24`) |
+| `--forward-vpeer-port-to-loopback PORT` | DNAT this port on the vpeer to 127.0.0.1 inside the tunnel (repeatable) |
 
 ---
 
@@ -110,35 +153,16 @@ Creates a named tunnel that persists until `CTRL+C`, then destroys it automatica
 
 ```bash
 vpn-passthrough create-tunnel my-tunnel
-vpn-passthrough create-tunnel --region-id us-texas --number-of-ports-to-forward 2 my-tunnel
-vpn-passthrough create-tunnel --without-vpn my-tunnel
+vpn-passthrough create-tunnel --region-id us-texas --forward-port-for transmission my-tunnel
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--region-id REGION` | PIA region ID |
-| `--vpn-user USERNAME` | PIA username (env: `VPN_PASSTHROUGH_USERNAME`) |
-| `--vpn-password PASSWORD` | PIA password (env: `VPN_PASSTHROUGH_PASSWORD`) |
-| `--without-vpn` | Create namespace without a VPN connection |
-| `--number-of-ports-to-forward N` | Number of ports to forward (env: `VPN_PASSTHROUGH_NUMBER_OF_PORTS_TO_FORWARD`) |
-
----
-
-### `start-tunnel NAME`
-
-Starts a tunnel and keeps it running. Sends `READY=1` to systemd when connected. Suitable for use as a systemd service.
-
-```bash
-vpn-passthrough start-tunnel --region-id nl-amsterdam my-tunnel
-vpn-passthrough start-tunnel --persistent my-tunnel   # writes config to /etc/vpn-passthrough/tunnels/
-```
-
-A per-tunnel systemd service template is provided:
-
-```bash
-# Reads config from /etc/vpn-passthrough/tunnels/my-tunnel.yaml
-sudo systemctl enable --now vpn-passthrough@my-tunnel.service
-```
+| `--region-id REGION` | VPN region ID (env: `VPN_PASSTHROUGH_REGION_ID`) |
+| `--backend-name NAME` | Backend name (env: `VPN_PASSTHROUGH_BACKEND`) |
+| `--forward-port-for NAME` | Forward a port with the given name (repeatable) |
+| `--veth-cidr CIDR` | Fixed CIDR for the veth pair |
+| `--forward-vpeer-port-to-loopback PORT` | DNAT this port on the vpeer to 127.0.0.1 (repeatable) |
 
 ---
 
@@ -159,19 +183,17 @@ Executes a command inside a tunnel. The process inherits the client's stdin/stdo
 ```bash
 vpn-passthrough run-process --in-tunnel my-tunnel curl https://ifconfig.me
 vpn-passthrough run-process --region-id us-texas curl https://ifconfig.me
-vpn-passthrough run-process --in-tunnel my-tunnel --restart-every 60 my-app
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--in-tunnel NAME` | Use an existing named tunnel |
-| `--region-id REGION` | PIA region for an ephemeral tunnel |
-| `--vpn-user USERNAME` | PIA username |
-| `--vpn-password PASSWORD` | PIA password |
-| `--restart-every SECONDS` | Kill and restart the process every N seconds |
+| `--region-id REGION` | VPN region for a temporary tunnel |
+| `--backend-name NAME` | Backend name for the temporary tunnel |
 | `--kill-with SIGNAL` | Signal used for restart (default: `SIGTERM`) |
+| `--configure-with SCRIPT` | Script to run after port rebind and before process restart |
 
-If `--in-tunnel` is omitted, an ephemeral tunnel is created for the duration of the command.
+If `--in-tunnel` is omitted, a temporary tunnel is created for the duration of the command.
 
 ---
 
@@ -202,11 +224,35 @@ Output columns: Name, VPN, Region, Public IP, Gateway IP, Tun IP, Forwarded Port
 
 ### `list-regions`
 
-Lists available PIA VPN regions.
+Lists available VPN regions.
 
 ```bash
 vpn-passthrough list-regions
+vpn-passthrough list-regions --backend-name pia
 vpn-passthrough list-regions --format json
+```
+
+---
+
+### `list-backends`
+
+Lists configured backends and available backend types.
+
+```bash
+vpn-passthrough list-backends
+```
+
+---
+
+### `show-config`
+
+Prints the loaded configuration as YAML.
+
+```bash
+vpn-passthrough show-config
+vpn-passthrough show-config --empty
+vpn-passthrough show-config --server-only
+vpn-passthrough show-config --client-only
 ```
 
 ---

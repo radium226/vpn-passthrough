@@ -87,9 +87,9 @@ class _TunnelContext:
     tun_ip: str
     forwarded_ports: dict[str, int]
     veth: str = ""
-    veth_addr: str = ""
+    veth_ip: str = ""
     vpeer: str = ""
-    vpeer_addr: str = ""
+    vpeer_ip: str = ""
     region_id: str | None = None
     forward_port: Callable[[], AbstractAsyncContextManager[int]] | None = None
 
@@ -142,9 +142,9 @@ class Service():
                 tun_ip=ctx.tun_ip if ctx is not None else None,
                 forwarded_ports=ctx.forwarded_ports if ctx is not None else {},
                 veth=ctx.veth if ctx is not None else None,
-                veth_addr=ctx.veth_addr if ctx is not None else None,
+                veth_ip=ctx.veth_ip if ctx is not None else None,
                 vpeer=ctx.vpeer if ctx is not None else None,
-                vpeer_addr=ctx.vpeer_addr if ctx is not None else None,
+                vpeer_ip=ctx.vpeer_ip if ctx is not None else None,
                 processes=procs,
             ))
         return tunnels
@@ -216,9 +216,9 @@ class Service():
                     tun_ip=session.tun_ip,
                     forwarded_ports=forwarded_ports,
                     veth=network_interfaces.veth,
-                    veth_addr=network_interfaces.veth_addr,
+                    veth_ip=network_interfaces.veth_ip,
                     vpeer=network_interfaces.vpeer,
-                    vpeer_addr=network_interfaces.vpeer_addr,
+                    vpeer_ip=network_interfaces.vpeer_ip,
                     region_id=region_id,
                     forward_port=session.forward_port,
                 )
@@ -231,9 +231,9 @@ class Service():
                     tun_ip="",
                     forwarded_ports={},
                     veth=network_interfaces.veth,
-                    veth_addr=network_interfaces.veth_addr,
+                    veth_ip=network_interfaces.veth_ip,
                     vpeer=network_interfaces.vpeer,
-                    vpeer_addr=network_interfaces.vpeer_addr,
+                    vpeer_ip=network_interfaces.vpeer_ip,
                 )
 
             self.namespaces[tunnel_name] = namespace
@@ -285,9 +285,9 @@ class Service():
                 "tun_ip": ctx.tun_ip if ctx is not None else "",
                 "forwarded_ports": ctx.forwarded_ports if ctx is not None else {},
                 "veth": ctx.veth if ctx is not None else "",
-                "veth_addr": ctx.veth_addr if ctx is not None else "",
+                "veth_ip": ctx.veth_ip if ctx is not None else "",
                 "vpeer": ctx.vpeer if ctx is not None else "",
-                "vpeer_addr": ctx.vpeer_addr if ctx is not None else "",
+                "vpeer_ip": ctx.vpeer_ip if ctx is not None else "",
             }
             try:
                 command = Template(request.command).render(**jinja_vars)
@@ -309,9 +309,9 @@ class Service():
                     "tun_ip": ctx.tun_ip if ctx is not None else None,
                     "forwarded_ports": ctx.forwarded_ports if ctx is not None else {},
                     "veth": ctx.veth if ctx is not None else None,
-                    "veth_addr": ctx.veth_addr if ctx is not None else None,
+                    "veth_ip": ctx.veth_ip if ctx is not None else None,
                     "vpeer": ctx.vpeer if ctx is not None else None,
-                    "vpeer_addr": ctx.vpeer_addr if ctx is not None else None,
+                    "vpeer_ip": ctx.vpeer_ip if ctx is not None else None,
                 }
                 try:
                     configure_proc = await asyncio.create_subprocess_exec(
@@ -498,9 +498,9 @@ class Service():
                         tun_ip=ctx.tun_ip,
                         forwarded_ports=new_ports,
                         veth=ctx.veth,
-                        veth_addr=ctx.veth_addr,
+                        veth_ip=ctx.veth_ip,
                         vpeer=ctx.vpeer,
-                        vpeer_addr=ctx.vpeer_addr,
+                        vpeer_ip=ctx.vpeer_ip,
                         region_id=ctx.region_id,
                         forward_port=ctx.forward_port,
                     )

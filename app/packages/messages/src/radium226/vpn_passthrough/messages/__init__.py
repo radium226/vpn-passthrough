@@ -83,9 +83,9 @@ class TunnelInfo(BaseModel):
     tun_ip: str | None = None
     forwarded_ports: dict[str, int] = {}
     veth: str | None = None
-    veth_addr: str | None = None
+    veth_ip: str | None = None
     vpeer: str | None = None
-    vpeer_addr: str | None = None
+    vpeer_ip: str | None = None
     processes: list[ProcessInfo] = []
 
 
