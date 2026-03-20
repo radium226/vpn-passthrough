@@ -6,7 +6,7 @@ Requires=vpn-passthrough.service
 [Service]
 Type=notify
 NotifyAccess=main
-ExecStart=/usr/bin/vpn-passthrough start-tunnel %i
+ExecStart=/usr/bin/vpn-passthrough --config /etc/vpn-passthrough start-tunnel %i
 Restart=on-failure
 RestartSec=5
 Group=vpn-passthrough
