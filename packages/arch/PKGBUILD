@@ -13,6 +13,7 @@ makedepends=('uv' 'python-installer' 'python-wheel' 'python-build' 'python-uv-bu
 source=(
     "vpn-passthrough.service"
     "vpn-passthrough@.service"
+    "vpn-passthrough-ifconfig-me@.service"
     "vpn-passthrough.socket"
     "vpn-passthrough.sysusers"
     "vpn-passthrough.tmpfiles"
@@ -26,6 +27,7 @@ source=(
     "radium226_vpn_passthrough_dummy-0.1.0.tar.gz"
 )
 sha256sums=(
+    "SKIP"
     "SKIP"
     "SKIP"
     "SKIP"
@@ -87,6 +89,8 @@ package_vpn-passthrough-cli() {
         "$pkgdir/usr/lib/systemd/system/vpn-passthrough.service"
     install -Dm644 "$srcdir/vpn-passthrough@.service" \
         "$pkgdir/usr/lib/systemd/system/vpn-passthrough@.service"
+    install -Dm644 "$srcdir/vpn-passthrough-ifconfig-me@.service" \
+        "$pkgdir/usr/lib/systemd/system/vpn-passthrough-ifconfig-me@.service"
     install -Dm644 "$srcdir/vpn-passthrough.socket" \
         "$pkgdir/usr/lib/systemd/system/vpn-passthrough.socket"
     install -Dm644 "$srcdir/vpn-passthrough.sysusers" \

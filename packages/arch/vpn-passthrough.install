@@ -17,6 +17,11 @@ post_upgrade() {
     if systemctl is-active --quiet vpn-passthrough; then
         systemctl restart vpn-passthrough
     fi
+    while IFS= read -r unit; do
+        systemctl restart "${unit}"
+    done < <(systemctl list-units --type=service --state=active --plain --no-legend --no-pager \
+        | awk '{print $1}' \
+        | grep -E '^vpn-passthrough@.+\.service$')
 }
 
 pre_remove() {

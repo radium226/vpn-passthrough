@@ -39,22 +39,27 @@ class Namespace:
 
     @staticmethod
     @asynccontextmanager
-    async def create(name: str, *, base_folder_path: Path) -> AsyncIterator["Namespace"]:
+    async def create(name: str, *, base_folder_path: Path, client_pid: int | None = None) -> AsyncIterator["Namespace"]:
         if not _TUNNEL_NAME_RE.match(name):
             raise ValueError(f"Invalid tunnel name: {name!r} (must match {_TUNNEL_NAME_RE.pattern})")
         ns_dir = base_folder_path / name
         ns_dir.mkdir(parents=True, exist_ok=True)
 
-        proc = await asyncio.create_subprocess_exec(
-            "unshare", 
-                "--net", 
-                "--mount", 
+        cmd = [
+            "unshare",
+                "--net",
+                "--mount",
                 "--user",
                 "--map-user=1000",
                 "--map-group=1000",
                 "--propagation", "private",
             "tail", "-f", "/dev/null",
-        )
+        ]
+
+        if client_pid is not None:
+            cmd = ["nsenter", f"--mount=/proc/{client_pid}/ns/mnt", "--"] + cmd
+
+        proc = await asyncio.create_subprocess_exec(*cmd)
         (ns_dir / "pid").write_text(str(proc.pid))
 
         try:

@@ -177,11 +177,12 @@ class Service():
         backend_name: str | None = None,
         veth_cidr: str | None = None,
         ports_to_forward_from_vpeer_to_loopback: list[int] = [],
+        client_pid: int | None = None,
     ) -> None:
         self._tunnel_rebind_conditions[tunnel_name] = asyncio.Condition()
         stack = AsyncExitStack()
         try:
-            namespace = await stack.enter_async_context(Namespace.create(tunnel_name, base_folder_path=self.namespace_base_folder_path))
+            namespace = await stack.enter_async_context(Namespace.create(tunnel_name, base_folder_path=self.namespace_base_folder_path, client_pid=client_pid))
             network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace, cidr=veth_cidr))
             await stack.enter_async_context(Internet.share(tunnel_name, network_interfaces))
             await stack.enter_async_context(VpeerPortForward.setup(namespace, network_interfaces, ports_to_forward_from_vpeer_to_loopback))
@@ -264,14 +265,15 @@ class Service():
         tunnel_name = request.tunnel_name
         if tunnel_name not in self.namespaces:
             logger.info("Lazily creating tunnel {} for process", tunnel_name)
-            await self._setup_tunnel(tunnel_name, None, [], emit)
+            await self._setup_tunnel(tunnel_name, None, [], emit, client_pid=request.client_pid)
 
         namespace = self.namespaces[tunnel_name]
 
-        preexec_fn = make_preexec_fn(
+        preexec_fn, close_parent_fds = make_preexec_fn(
             request.username,
             namespace.pid,
             cwd=request.cwd,
+            client_pid=request.client_pid,
         )
 
         first = True
@@ -294,6 +296,7 @@ class Service():
                 args = [Template(arg).render(**jinja_vars) for arg in request.args]
             except TemplateError as e:
                 logger.error("Jinja2 template error in command: {}", e)
+                close_parent_fds()
                 for fd in (stdin_fd, stdout_fd, stderr_fd):
                     try:
                         os.close(fd)
@@ -321,6 +324,7 @@ class Service():
                     await configure_proc.communicate(json.dumps(payload).encode())
                     if configure_proc.returncode != 0:
                         def _close_fds() -> None:
+                            close_parent_fds()
                             for fd in (stdin_fd, stdout_fd, stderr_fd):
                                 try:
                                     os.close(fd)
@@ -358,6 +362,7 @@ class Service():
                     env=request.env,
                 )
             except FileNotFoundError:
+                close_parent_fds()
                 for fd in (stdin_fd, stdout_fd, stderr_fd):
                     try:
                         os.close(fd)
@@ -401,6 +406,7 @@ class Service():
                 await process.wait()
                 break
 
+        close_parent_fds()
         self.processes[tunnel_name].pop(process.pid, None)
         await self._notify_tunnel_updated(tunnel_name)
         for fd in (stdin_fd, stdout_fd, stderr_fd):

@@ -1,0 +1,13 @@
+[Unit]
+Description=Show public IP via VPN tunnel %i (ifconfig.me demo)
+After=vpn-passthrough@%i.service
+Requires=vpn-passthrough@%i.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vpn-passthrough run-process --in-tunnel %i -- /bin/sh -c 'while true; do curl -s ifconfig.me; sleep 10; done'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
