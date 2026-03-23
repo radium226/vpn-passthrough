@@ -17,10 +17,11 @@ from radium226.vpn_passthrough.app.commands._helpers import pass_config_folder
 @click.option("--forward-port-for", "names_of_ports_to_forward", multiple=True, help="Forward a port with the given name (repeatable, e.g. --forward-port-for transmission).")
 @click.option("--rebind-ports-every", "rebind_ports_every", type=float, default=None, help="Reallocate forwarded ports every N seconds (default: from config).")
 @click.option("--veth-cidr", "veth_cidr", default=None, help="Fixed CIDR for the veth pair (e.g. 10.200.5.0/24). If omitted, an address is derived from the tunnel name.")
+@click.option("--kill-switch", "kill_switch", type=click.Choice(["yes", "no"]), default=None, help="Block all traffic that bypasses the VPN tunnel (default: yes).")
 @click.option("--forward-vpeer-port-to-loopback", "ports_to_forward_from_vpeer_to_loopback", multiple=True, type=int, help="DNAT this port on the vpeer to 127.0.0.1 inside the tunnel (repeatable).")
 @click.argument("name")
 @pass_config_folder
-def start_tunnel(config_folder_path: Path | None, region_id: str | None, backend_name: str | None, names_of_ports_to_forward: tuple[str, ...], rebind_ports_every: float | None, veth_cidr: str | None, ports_to_forward_from_vpeer_to_loopback: tuple[int, ...], name: str) -> None:
+def start_tunnel(config_folder_path: Path | None, region_id: str | None, backend_name: str | None, names_of_ports_to_forward: tuple[str, ...], rebind_ports_every: float | None, veth_cidr: str | None, kill_switch: str | None, ports_to_forward_from_vpeer_to_loopback: tuple[int, ...], name: str) -> None:
     client_config = ClientConfig.load(config_folder_path)
     tunnel_configs = TunnelConfig.load_all(config_folder_path)
     tunnel_config = tunnel_configs.get(name, TunnelConfig(name=name))
@@ -28,6 +29,7 @@ def start_tunnel(config_folder_path: Path | None, region_id: str | None, backend
     resolved_names = list(names_of_ports_to_forward) if names_of_ports_to_forward else tunnel_config.names_of_ports_to_forward
     rebind_ports_every = rebind_ports_every if rebind_ports_every is not None else tunnel_config.rebind_ports_every
     veth_cidr = veth_cidr or tunnel_config.veth_cidr
+    resolved_kill_switch = (kill_switch == "yes") if kill_switch is not None else tunnel_config.kill_switch
     resolved_ports = list(ports_to_forward_from_vpeer_to_loopback) if ports_to_forward_from_vpeer_to_loopback else tunnel_config.ports_to_forward_from_vpeer_to_loopback
 
     async def _run() -> None:
@@ -73,6 +75,7 @@ def start_tunnel(config_folder_path: Path | None, region_id: str | None, backend
                     backend_name=backend_name,
                     rebind_ports_every=rebind_ports_every,
                     veth_cidr=veth_cidr,
+                    kill_switch=resolved_kill_switch,
                     ports_to_forward_from_vpeer_to_loopback=resolved_ports,
                     on_ready=on_ready,
                     on_config_used=on_config_used,

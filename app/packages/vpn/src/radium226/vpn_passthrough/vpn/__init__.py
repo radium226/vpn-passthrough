@@ -25,6 +25,7 @@ class Session:
     tun_ip: str
     dns_servers: list[str]
     forward_port: ForwardPort
+    server_ip: str | None = None
 
 
 class Backend(Protocol):

@@ -200,6 +200,7 @@ class PIABackend:
                     tun_ip=connection_info.tun_ip,
                     dns_servers=connection_info.dns_servers,
                     forward_port=_forward_port,
+                    server_ip=server_ip,
                 )
 
     async def list_regions(self) -> list[Region]:

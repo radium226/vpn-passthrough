@@ -28,6 +28,7 @@ class TunnelConfig(BaseModel):
     names_of_ports_to_forward: list[str] = []
     backend_name: str | None = None
     veth_cidr: str | None = None
+    kill_switch: bool = True
     rebind_ports_every: float | None = None
     ports_to_forward_from_vpeer_to_loopback: list[int] = []
 

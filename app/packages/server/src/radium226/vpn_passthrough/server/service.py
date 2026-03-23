@@ -47,7 +47,7 @@ from radium226.vpn_passthrough.messages import (
 )
 from radium226.vpn_passthrough.vpn import get_backend
 from .dns import DNS
-from .dns_leak_guard import DNSLeakGuard
+from .kill_switch import KillSwitch
 from .internet import Internet
 from .namespace import Namespace
 from .network_interfaces import NetworkInterfaces
@@ -176,6 +176,7 @@ class Service():
         emit: Any,
         backend_name: str | None = None,
         veth_cidr: str | None = None,
+        kill_switch: bool = True,
         ports_to_forward_from_vpeer_to_loopback: list[int] = [],
         client_pid: int | None = None,
     ) -> None:
@@ -200,7 +201,8 @@ class Service():
 
                 nameservers = list(session.dns_servers)
                 await stack.enter_async_context(DNS.setup(namespace, nameservers=nameservers))
-                await stack.enter_async_context(DNSLeakGuard.activate(namespace, network_interfaces))
+                if kill_switch and session.server_ip is not None:
+                    await stack.enter_async_context(KillSwitch.activate(network_interfaces, session.server_ip))
                 logger.info("DNS configured in tunnel {} (nameservers={})", tunnel_name, nameservers)
                 await emit(DNSConfigured(nameservers=nameservers), [])
 
@@ -455,7 +457,7 @@ class Service():
         fds: list[int],
         emit: Emit[ConnectedToVPN | DNSConfigured],
     ) -> tuple[TunnelCreated, list[int]]:
-        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
+        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, kill_switch=request.kill_switch, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
         logger.info("Tunnel {} created", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
@@ -473,7 +475,7 @@ class Service():
             backend_name=request.backend_name,
             names_of_ports_to_forward=request.names_of_ports_to_forward,
         ), [])
-        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
+        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, kill_switch=request.kill_switch, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
         logger.info("Tunnel {} started", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())

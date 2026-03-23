@@ -23,6 +23,7 @@ async def lookup_or_create_tunnel(
     tunnel_name: str | None,
     region_id: str | None,
     backend_name: str | None,
+    kill_switch: bool = True,
 ) -> AsyncIterator[TunnelInfo]:
     """Yield a TunnelInfo, creating (and later destroying) a temporary tunnel when tunnel_name is None."""
     if tunnel_name is not None:
@@ -30,7 +31,7 @@ async def lookup_or_create_tunnel(
         return
 
     temp_name = str(uuid.uuid4())
-    tunnel_created = await client.create_tunnel(temp_name, region_id=region_id, backend_name=backend_name)
+    tunnel_created = await client.create_tunnel(temp_name, region_id=region_id, backend_name=backend_name, kill_switch=kill_switch)
     try:
         yield tunnel_created.tunnel
     finally:
