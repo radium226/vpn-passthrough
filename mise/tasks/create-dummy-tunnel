@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euEo pipefail
+
+main()
+{
+    local app_dir
+    app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../app" && pwd)"
+
+    uv --directory "${app_dir}" run vpn-passthrough \
+        create-tunnel \
+            --backend-name="dummy" \
+            --rebind-ports-every=5 \
+                "dummy"
+}
+
+main "${@}"

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euEo pipefail
+
+main()
+{
+    local app_dir
+    app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../app" && pwd)"
+
+    uv --directory "${app_dir}" run vpn-passthrough \
+        run-process \
+            --in-tunnel="dummy" \
+            -- \
+            bash -c 'n=$([ "${VPN_PASSTHROUGH_RESTART_COUNT:-0}" = "0" ] && echo 10 || echo 3); for i in $(seq 1 "${n}"); do echo "${i}"; sleep 1; done'
+}
+
+main "${@}"

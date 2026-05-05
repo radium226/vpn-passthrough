@@ -4,11 +4,14 @@ set -euEo pipefail
 
 main()
 {
+    local app_dir
+    app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../app" && pwd)"
+
     uvx \
         --from="git+https://github.com/radium226/variables.git" \
             variables exec \
                 -- \
-                    sudo -E -u root -g "$(id -gn)" uv run vpn-passthrough start-server
+                    sudo -E -u root -g "$(id -gn)" uv --directory "${app_dir}" run vpn-passthrough start-server
 }
 
 main "${@}"

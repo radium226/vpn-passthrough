@@ -114,7 +114,8 @@ class Service():
         self._on_tunnels_changed = on_tunnels_changed
         self._tunnel_stop_signals: dict[TunnelName, asyncio.Future[None]] = {}
         self._tunnel_emit_fns: dict[TunnelName, Any] = {}  # Emit[TunnelStatusUpdated]
-        self._tunnel_rebind_conditions: dict[TunnelName, asyncio.Condition] = {}
+        self._tunnel_rebind_waiters: dict[TunnelName, set[asyncio.Future[None]]] = {}
+        self._tunnel_rebind_tasks: dict[TunnelName, asyncio.Task[None]] = {}
 
     @classmethod
     @asynccontextmanager
@@ -164,6 +165,8 @@ class Service():
             raise ValueError("backend_name is required to connect to VPN")
         info = next((backend for backend in self._backends if backend.name == backend_name), None)
         if info is None:
+            if backend_name == "dummy":
+                return get_backend("dummy"), {}
             available = [backend.name for backend in self._backends]
             raise LookupError(f"Backend {backend_name!r} not found. Available: {available}")
         return get_backend(info.type), info.credentials
@@ -180,7 +183,7 @@ class Service():
         ports_to_forward_from_vpeer_to_loopback: list[int] = [],
         client_pid: int | None = None,
     ) -> None:
-        self._tunnel_rebind_conditions[tunnel_name] = asyncio.Condition()
+        self._tunnel_rebind_waiters[tunnel_name] = set()
         stack = AsyncExitStack()
         try:
             namespace = await stack.enter_async_context(Namespace.create(tunnel_name, base_folder_path=self.namespace_base_folder_path, client_pid=client_pid))
@@ -279,6 +282,7 @@ class Service():
         )
 
         first = True
+        restart_count = 0
         self.processes.setdefault(tunnel_name, {})
 
         while True:
@@ -353,6 +357,7 @@ class Service():
                 except Exception as e:
                     logger.error("configure-with script failed: {}", e)
 
+            env = {**request.env, "VPN_PASSTHROUGH_RESTART_COUNT": str(restart_count)}
             try:
                 process = await asyncio.create_subprocess_exec(
                     command, *args,
@@ -361,7 +366,7 @@ class Service():
                     stderr=stderr_fd,
                     start_new_session=True,
                     preexec_fn=preexec_fn,
-                    env=request.env,
+                    env=env,
                 )
             except FileNotFoundError:
                 close_parent_fds()
@@ -383,27 +388,31 @@ class Service():
                 logger.debug("Process restarted with pid {} (forwarded_ports={})", process.pid, ports)
                 await emit(ProcessRestarted(pid=process.pid, forwarded_ports=ports), [])
 
-            rebind_condition = self._tunnel_rebind_conditions.get(tunnel_name)
-            if rebind_condition is not None:
-                async def _wait_for_tunnel_rebind(cond: asyncio.Condition) -> None:
-                    async with cond:
-                        await cond.wait()
-                wait_task = asyncio.create_task(process.wait())
-                rebind_task = asyncio.create_task(_wait_for_tunnel_rebind(rebind_condition))
-                done, _ = await asyncio.wait(
-                    [wait_task, rebind_task],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                wait_task.cancel()
-                rebind_task.cancel()
-                if rebind_task in done:
-                    self.processes[tunnel_name].pop(process.pid, None)
-                    await self._notify_tunnel_updated(tunnel_name)
-                    os.killpg(os.getpgid(process.pid), kill_signal)
-                    await process.wait()
-                    continue
-                else:
-                    break
+            rebind_waiters = self._tunnel_rebind_waiters.get(tunnel_name)
+            if rebind_waiters is not None:
+                logger.debug("Waiting for process {} to exit or tunnel {} to rebind ports", process.pid, tunnel_name)
+                rebind_future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+                rebind_waiters.add(rebind_future)
+                try:
+                    wait_task = asyncio.create_task(process.wait())
+                    done, _ = await asyncio.wait(
+                        {wait_task, rebind_future},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    wait_task.cancel()
+                    if rebind_future in done:
+                        self.processes[tunnel_name].pop(process.pid, None)
+                        await self._notify_tunnel_updated(tunnel_name)
+                        logger.info("Restarting process {} in tunnel {} due to port rebind", process.pid, tunnel_name)
+                        os.killpg(os.getpgid(process.pid), kill_signal)
+                        await process.wait()
+                        restart_count += 1
+                        continue
+                    else:
+                        break
+                finally:
+                    rebind_waiters.discard(rebind_future)
+                    rebind_future.cancel()
             else:
                 await process.wait()
                 break
@@ -428,7 +437,10 @@ class Service():
         emit: Emit[Never],
     ) -> tuple[ProcessKilled, list[int]]:
         logger.info("Killing process group {} with signal {}", request.pid, signal.Signals(request.signal).name)
-        os.killpg(os.getpgid(request.pid), request.signal)
+        
+        pgid = os.getpgid(request.pid)
+        logger.debug("Process group ID for pid {} is {}", request.pid, pgid)
+        os.killpg(pgid, request.signal)
         return ProcessKilled(request_id=request.id, pid=request.pid), []
 
 
@@ -451,6 +463,36 @@ class Service():
         else:
             raise RuntimeError("Could not determine remote IP from Cloudflare trace")
 
+    async def _rebind_loop(self, tunnel_name: TunnelName, rebind_every: float, emit: Any | None = None) -> None:
+        while True:
+            await asyncio.sleep(rebind_every)
+            ctx = self.tunnel_contexts.get(tunnel_name)
+            if ctx is None or ctx.forward_port is None:
+                break
+            new_ports: dict[str, int] = {}
+            for port_name in ctx.forwarded_ports:
+                new_port = await self.exit_stacks[tunnel_name].enter_async_context(ctx.forward_port())
+                new_ports[port_name] = new_port
+            self.tunnel_contexts[tunnel_name] = _TunnelContext(
+                public_ip=ctx.public_ip,
+                gateway_ip=ctx.gateway_ip,
+                tun_ip=ctx.tun_ip,
+                forwarded_ports=new_ports,
+                veth=ctx.veth,
+                veth_ip=ctx.veth_ip,
+                vpeer=ctx.vpeer,
+                vpeer_ip=ctx.vpeer_ip,
+                region_id=ctx.region_id,
+                forward_port=ctx.forward_port,
+            )
+            logger.info("Rebound ports for tunnel {} (new_ports={})", tunnel_name, new_ports)
+            if emit is not None:
+                await emit(PortsRebound(forwarded_ports=new_ports), [])
+            await self._notify_tunnel_updated(tunnel_name)
+            for fut in list(self._tunnel_rebind_waiters.get(tunnel_name) or []):
+                if not fut.done():
+                    fut.set_result(None)
+
     async def handle_create_tunnel(
         self,
         request: CreateTunnel,
@@ -459,6 +501,11 @@ class Service():
     ) -> tuple[TunnelCreated, list[int]]:
         await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, kill_switch=request.kill_switch, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
         logger.info("Tunnel {} created", request.name)
+        if request.rebind_ports_every is not None:
+            rebind_every = max(request.rebind_ports_every, _MIN_RESTART_INTERVAL)
+            self._tunnel_rebind_tasks[request.name] = asyncio.create_task(
+                self._rebind_loop(request.name, rebind_every)
+            )
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())
         tunnel_info = next((tunnel for tunnel in self._current_tunnels() if tunnel.name == request.name), TunnelInfo(name=request.name))
@@ -489,38 +536,7 @@ class Service():
         rebind_task: asyncio.Task[None] | None = None
         if request.rebind_ports_every is not None:
             rebind_every = max(request.rebind_ports_every, _MIN_RESTART_INTERVAL)
-
-            async def _rebind_loop() -> None:
-                while True:
-                    await asyncio.sleep(rebind_every)
-                    ctx = self.tunnel_contexts.get(request.name)
-                    if ctx is None or ctx.forward_port is None:
-                        break
-                    new_ports: dict[str, int] = {}
-                    for port_name in ctx.forwarded_ports:
-                        new_port = await self.exit_stacks[request.name].enter_async_context(ctx.forward_port())
-                        new_ports[port_name] = new_port
-                    self.tunnel_contexts[request.name] = _TunnelContext(
-                        public_ip=ctx.public_ip,
-                        gateway_ip=ctx.gateway_ip,
-                        tun_ip=ctx.tun_ip,
-                        forwarded_ports=new_ports,
-                        veth=ctx.veth,
-                        veth_ip=ctx.veth_ip,
-                        vpeer=ctx.vpeer,
-                        vpeer_ip=ctx.vpeer_ip,
-                        region_id=ctx.region_id,
-                        forward_port=ctx.forward_port,
-                    )
-                    logger.info("Rebound ports for tunnel {} (new_ports={})", request.name, new_ports)
-                    await emit(PortsRebound(forwarded_ports=new_ports), [])
-                    await self._notify_tunnel_updated(request.name)
-                    condition = self._tunnel_rebind_conditions.get(request.name)
-                    if condition is not None:
-                        async with condition:
-                            condition.notify_all()
-
-            rebind_task = asyncio.create_task(_rebind_loop())
+            rebind_task = asyncio.create_task(self._rebind_loop(request.name, rebind_every, emit))
 
         try:
             await stop
@@ -544,7 +560,15 @@ class Service():
         self.namespaces.pop(request.name, None)
         self.tunnel_contexts.pop(request.name, None)
         self.processes.pop(request.name, None)
-        self._tunnel_rebind_conditions.pop(request.name, None)
+        self._tunnel_rebind_waiters.pop(request.name, None)
+
+        rebind_task = self._tunnel_rebind_tasks.pop(request.name, None)
+        if rebind_task is not None:
+            rebind_task.cancel()
+            try:
+                await rebind_task
+            except asyncio.CancelledError:
+                pass
 
         # Unblock handle_start_tunnel (and thus the client) before the slow
         # stack teardown so the client sees the stop immediately.

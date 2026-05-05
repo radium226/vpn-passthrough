@@ -174,3 +174,33 @@ async def test_multiple_concurrent_requests(socket_path: Path):
             )
 
             assert results == {"a": "alpha", "b": "beta", "c": "gamma"}
+
+
+@pytest.mark.asyncio
+async def test_events_are_bound_to_their_request(socket_path: Path):
+    async def handle_work(request: Work, fds: list[int], emit: Emit[Progress]) -> tuple[Done, list[int]]:
+        for i in range(request.steps):
+            await emit(Progress(percent=(i + 1) * 100 // request.steps), [])
+        return Done(request_id=request.id, result="finished"), []
+
+    async with open_server(socket_path, CODEC, handlers=[RequestHandler(request_type=Work, on_request=handle_work)]):
+        events_a: list[int] = []
+        events_b: list[int] = []
+
+        async def make_request(req_id: str, steps: int, events: list[int]) -> None:
+            async def on_event(event: Progress, fds: list[int]) -> None:
+                events.append(event.percent)
+
+            async with open_client(socket_path, CODEC) as client:
+                await client.request(
+                    Work(id=req_id, steps=steps),
+                    handler=ResponseHandler(on_event=on_event),
+                )
+
+        await asyncio.gather(
+            make_request("a", 2, events_a),
+            make_request("b", 4, events_b),
+        )
+
+        assert events_a == [50, 100]
+        assert events_b == [25, 50, 75, 100]

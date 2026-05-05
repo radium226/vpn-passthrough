@@ -7,13 +7,13 @@ authors = [
     { name = "radium226", email = "radium226@rouages.xyz" }
 ]
 requires-python = ">=3.14"
-dependencies = ["click", "prettytable", "pyyaml", "radium226-vpn-passthrough-server", "radium226-vpn-passthrough-client", "radium226-vpn-passthrough-vpn", "radium226-vpn-passthrough-pia"]
+dependencies = ["click", "prettytable", "pyyaml", "radium226-vpn-passthrough-server", "radium226-vpn-passthrough-client", "radium226-vpn-passthrough-vpn", "radium226-vpn-passthrough-pia", "radium226-vpn-passthrough-dummy"]
 
 [project.scripts]
 vpn-passthrough = "radium226.vpn_passthrough.app.cli:app"
 
 [build-system]
-requires = ["uv_build>=0.10.3,<0.11.0"]
+requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
@@ -24,6 +24,7 @@ radium226-vpn-passthrough-server = { workspace = true }
 radium226-vpn-passthrough-client = { workspace = true }
 radium226-vpn-passthrough-vpn = { workspace = true }
 radium226-vpn-passthrough-pia = { workspace = true }
+radium226-vpn-passthrough-dummy = { workspace = true }
 
 [dependency-groups]
 dev = [

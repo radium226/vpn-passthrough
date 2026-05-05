@@ -185,6 +185,7 @@ async def accept_connections(
         if path.exists():
             logger.warning("Removing stale socket file: {}", path)
             path.unlink()
+        path.parent.mkdir(parents=True, exist_ok=True)
         server_sock.bind(str(path))
         os.chmod(path, 0o660)
         server_sock.listen(16)

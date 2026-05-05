@@ -14,7 +14,7 @@ class ServerConfig:
     socket_file_path: Path = _DEFAULT_SOCKET_FILE_PATH
     namespace_base_folder_path: Path = _DEFAULT_NAMESPACE_FOLDER_PATH
     backends_folder_path: Path = _DEFAULT_BACKENDS_FOLDER_PATH
-    default_backend_name: str | None = None
+    default_backend_name: str | None = "dummy"
 
     @classmethod
     def load(cls, folder_path: Path | None = None) -> "ServerConfig":

@@ -5,7 +5,7 @@ requires-python = ">=3.14"
 dependencies = ["radium226-vpn-passthrough-vpn"]
 
 [build-system]
-requires = ["uv_build>=0.10.3,<0.11.0"]
+requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]

@@ -62,6 +62,7 @@ class Server[RequestT: Request, EventT, ResponseT: Response]():
                                 )
                             except Exception:
                                 logger.exception("Handler raised an exception for request {} (id={})", type(request).__name__, request.id)
+                                await connection.aclose()
 
                         asyncio.create_task(handle_request(request, frame.fds))
 
