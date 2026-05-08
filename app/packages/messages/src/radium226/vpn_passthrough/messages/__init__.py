@@ -125,6 +125,8 @@ class CreateTunnel(BaseModel, Request[TunnelCreated, ConnectedToVPN | DNSConfigu
     kill_switch: bool = True
     rebind_ports_every: float | None = None
     ports_to_forward_from_vpeer_to_loopback: list[int] = []
+    dns_overrides: dict[str, list[str]] = {}
+    extra_routes: list[str] = []
     type: Literal["create_tunnel"] = "create_tunnel"
 
 
@@ -166,6 +168,8 @@ class StartTunnel(BaseModel, Request["TunnelStopped", "ConfigUsed | TunnelStarte
     veth_cidr: str | None = None
     kill_switch: bool = True
     ports_to_forward_from_vpeer_to_loopback: list[int] = []
+    dns_overrides: dict[str, list[str]] = {}
+    extra_routes: list[str] = []
     type: Literal["start_tunnel"] = "start_tunnel"
 
 

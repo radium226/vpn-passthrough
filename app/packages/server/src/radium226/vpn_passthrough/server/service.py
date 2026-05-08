@@ -182,12 +182,14 @@ class Service():
         kill_switch: bool = True,
         ports_to_forward_from_vpeer_to_loopback: list[int] = [],
         client_pid: int | None = None,
+        dns_overrides: dict[str, list[str]] | None = None,
+        extra_routes: list[str] | None = None,
     ) -> None:
         self._tunnel_rebind_waiters[tunnel_name] = set()
         stack = AsyncExitStack()
         try:
             namespace = await stack.enter_async_context(Namespace.create(tunnel_name, base_folder_path=self.namespace_base_folder_path, client_pid=client_pid))
-            network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace, cidr=veth_cidr))
+            network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace, cidr=veth_cidr, extra_routes=extra_routes))
             await stack.enter_async_context(Internet.share(tunnel_name, network_interfaces))
             await stack.enter_async_context(VpeerPortForward.setup(namespace, network_interfaces, ports_to_forward_from_vpeer_to_loopback))
 
@@ -203,9 +205,9 @@ class Service():
                 )
 
                 nameservers = list(session.dns_servers)
-                await stack.enter_async_context(DNS.setup(namespace, nameservers=nameservers))
+                await stack.enter_async_context(DNS.setup(namespace, nameservers=nameservers, dns_overrides=dns_overrides))
                 if kill_switch and session.server_ip is not None:
-                    await stack.enter_async_context(KillSwitch.activate(network_interfaces, session.server_ip))
+                    await stack.enter_async_context(KillSwitch.activate(network_interfaces, session.server_ip, extra_routes=extra_routes))
                 logger.info("DNS configured in tunnel {} (nameservers={})", tunnel_name, nameservers)
                 await emit(DNSConfigured(nameservers=nameservers), [])
 
@@ -229,7 +231,7 @@ class Service():
                     forward_port=session.forward_port,
                 )
             else:
-                await stack.enter_async_context(DNS.setup(namespace, nameservers=None))
+                await stack.enter_async_context(DNS.setup(namespace, nameservers=None, dns_overrides=dns_overrides))
                 await emit(DNSConfigured(nameservers=[]), [])
                 self.tunnel_contexts[tunnel_name] = _TunnelContext(
                     public_ip="",
@@ -499,7 +501,7 @@ class Service():
         fds: list[int],
         emit: Emit[ConnectedToVPN | DNSConfigured],
     ) -> tuple[TunnelCreated, list[int]]:
-        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, kill_switch=request.kill_switch, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
+        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, kill_switch=request.kill_switch, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback, dns_overrides=request.dns_overrides or None, extra_routes=request.extra_routes or None)
         logger.info("Tunnel {} created", request.name)
         if request.rebind_ports_every is not None:
             rebind_every = max(request.rebind_ports_every, _MIN_RESTART_INTERVAL)
@@ -522,7 +524,7 @@ class Service():
             backend_name=request.backend_name,
             names_of_ports_to_forward=request.names_of_ports_to_forward,
         ), [])
-        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, kill_switch=request.kill_switch, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback)
+        await self._setup_tunnel(request.name, request.region_id, request.names_of_ports_to_forward, emit, backend_name=request.backend_name, veth_cidr=request.veth_cidr, kill_switch=request.kill_switch, ports_to_forward_from_vpeer_to_loopback=request.ports_to_forward_from_vpeer_to_loopback, dns_overrides=request.dns_overrides or None, extra_routes=request.extra_routes or None)
         logger.info("Tunnel {} started", request.name)
         if self._on_tunnels_changed is not None:
             self._on_tunnels_changed(self._current_tunnels())

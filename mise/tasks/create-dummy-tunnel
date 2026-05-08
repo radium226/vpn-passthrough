@@ -2,6 +2,10 @@
 
 set -euEo pipefail
 
+
+# --dns-override "*.internal=10.0.0.1"
+
+
 main()
 {
     local app_dir
@@ -9,8 +13,9 @@ main()
 
     uv --directory "${app_dir}" run vpn-passthrough \
         create-tunnel \
-            --backend-name="dummy" \
-            --rebind-ports-every=5 \
+            --backend-name="pia" \
+            --dns-override "*.internal=10.0.0.1" \
+            --extra-route "10.0.0.1/32" \
                 "dummy"
 }
 

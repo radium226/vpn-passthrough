@@ -15,13 +15,19 @@ class KillSwitch:
     async def activate(
         ni: NetworkInterfaces,
         server_ip: str,
+        extra_routes: list[str] | None = None,
     ) -> AsyncIterator[None]:
         table_name = f"kill_switch_{ni.veth}"
+        extra_accept_rules = "".join(
+            f'        iifname "{ni.veth}" ip daddr {route} accept\n'
+            for route in (extra_routes or [])
+        )
         ruleset = (
             f"table inet {table_name} {{\n"
             f"    chain forward {{\n"
             f"        type filter hook forward priority filter; policy accept;\n"
             f'        iifname "{ni.veth}" ip daddr {server_ip} accept\n'
+            f"{extra_accept_rules}"
             f'        iifname "{ni.veth}" drop\n'
             f"    }}\n"
             f"}}\n"

@@ -15,6 +15,8 @@ main()
                                 --username="{{ PIA_USER }}" \
                                 --password="{{ PIA_PASS }}" \
                                 --number-of-ports-to-forward=1 \
+                                --extra-route "10.0.0.0/24" \
+                                --dns-override "*.internal=10.0.0.1" \
                                     "test"
 }
 

@@ -1,6 +1,9 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
+
+from loguru import logger
 
 from ._run import run
 from .namespace import Namespace
@@ -9,14 +12,16 @@ from .namespace import Namespace
 class DNS:
     @staticmethod
     @asynccontextmanager
-    async def setup(namespace: Namespace, nameservers: list[str] | None = None) -> AsyncIterator[None]:
+    async def setup(
+        namespace: Namespace,
+        nameservers: list[str] | None = None,
+        dns_overrides: dict[str, list[str]] | None = None,
+    ) -> AsyncIterator[None]:
         if nameservers is None:
             nameservers = ["1.1.1.1"]
+
         resolv_file_path = namespace.directory / "resolv.conf"
-        resolv_file_path.write_text(
-            "# Created by VPN PassThrough\n\n"
-            + "".join(f"nameserver {ns}\n" for ns in nameservers)
-        )
+        resolv_file_path.write_text("# Created by VPN PassThrough\n\nnameserver 127.0.0.1\n")
 
         # Use only files + dns for hosts resolution — strips mdns/resolve/myhostname
         # which could bypass the VPN tunnel and leak DNS queries to the host.
@@ -64,8 +69,39 @@ class DNS:
             preexec_fn=namespace.enter,
         )
 
+        dnsmasq_conf_path = namespace.directory / "dnsmasq.conf"
+        lines: list[str] = [
+            "no-resolv",
+            "listen-address=127.0.0.1",
+            "bind-interfaces",
+        ]
+        for ns in nameservers:
+            lines.append(f"server={ns}")
+        if dns_overrides:
+            for domain, servers in dns_overrides.items():
+                for server in servers:
+                    lines.append(f"server=/{domain}/{server}")
+        dnsmasq_conf_path.write_text("\n".join(lines) + "\n")
+
+        dnsmasq_proc = await asyncio.create_subprocess_exec(
+            "dnsmasq",
+            "--no-daemon",
+            f"--conf-file={dnsmasq_conf_path}",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+            preexec_fn=namespace.enter,
+        )
+        logger.info("dnsmasq started in tunnel namespace (pid={})", dnsmasq_proc.pid)
+
         try:
             yield
         finally:
+            dnsmasq_proc.terminate()
+            try:
+                await asyncio.wait_for(dnsmasq_proc.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                dnsmasq_proc.kill()
+                await dnsmasq_proc.wait()
+            dnsmasq_conf_path.unlink(missing_ok=True)
             resolv_file_path.unlink(missing_ok=True)
             nsswitch_file_path.unlink(missing_ok=True)

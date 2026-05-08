@@ -39,7 +39,7 @@ class NetworkInterfaces:
 
     @staticmethod
     @asynccontextmanager
-    async def add(namespace: Namespace, veth_ip: str | None = None, vpeer_ip: str | None = None, cidr: str | None = None) -> AsyncIterator["NetworkInterfaces"]:
+    async def add(namespace: Namespace, veth_ip: str | None = None, vpeer_ip: str | None = None, cidr: str | None = None, extra_routes: list[str] | None = None) -> AsyncIterator["NetworkInterfaces"]:
         name = namespace.name
         slot = int(hashlib.md5(name.encode()).hexdigest()[:4], 16) % 254 + 1
 
@@ -72,6 +72,8 @@ class NetworkInterfaces:
             await run(["ip", "link", "set", vpeer, "up"], check=True, preexec_fn=namespace.enter)
             await run(["ip", "link", "set", "lo", "up"], check=True, preexec_fn=namespace.enter)
             await run(["ip", "route", "add", "default", "via", resolved_veth_ip], check=True, preexec_fn=namespace.enter)
+            for route in (extra_routes or []):
+                await run(["ip", "route", "add", route, "via", resolved_veth_ip], check=True, preexec_fn=namespace.enter)
 
             yield NetworkInterfaces(name, veth, vpeer, resolved_veth_ip, resolved_vpeer_ip, prefix_len)
         finally:

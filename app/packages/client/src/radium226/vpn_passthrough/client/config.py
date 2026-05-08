@@ -31,6 +31,8 @@ class TunnelConfig(BaseModel):
     kill_switch: bool = True
     rebind_ports_every: float | None = None
     ports_to_forward_from_vpeer_to_loopback: list[int] = []
+    dns_overrides: dict[str, list[str]] = {}
+    extra_routes: list[str] = []
 
     @classmethod
     def load_all(cls, folder_path: Path | None = None) -> dict[str, "TunnelConfig"]:

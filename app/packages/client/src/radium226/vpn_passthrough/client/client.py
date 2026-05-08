@@ -159,6 +159,8 @@ class Client:
         kill_switch: bool = True,
         rebind_ports_every: float | None = None,
         ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
+        dns_overrides: dict[str, list[str]] | None = None,
+        extra_routes: list[str] | None = None,
     ) -> TunnelCreated: ...
 
     async def create_tunnel(
@@ -172,6 +174,8 @@ class Client:
         kill_switch: bool = True,
         rebind_ports_every: float | None = None,
         ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
+        dns_overrides: dict[str, list[str]] | None = None,
+        extra_routes: list[str] | None = None,
     ) -> TunnelCreated:
         if isinstance(name_or_config, TunnelConfig):
             config = name_or_config
@@ -183,6 +187,8 @@ class Client:
             kill_switch = config.kill_switch
             rebind_ports_every = config.rebind_ports_every
             ports_to_forward_from_vpeer_to_loopback = config.ports_to_forward_from_vpeer_to_loopback
+            dns_overrides = config.dns_overrides or None
+            extra_routes = config.extra_routes or None
         else:
             name = name_or_config
 
@@ -217,6 +223,8 @@ class Client:
                 kill_switch=kill_switch,
                 rebind_ports_every=rebind_ports_every,
                 ports_to_forward_from_vpeer_to_loopback=ports_to_forward_from_vpeer_to_loopback or [],
+                dns_overrides=dns_overrides or {},
+                extra_routes=extra_routes or [],
             ),
             handler=ResponseHandler[ConnectedToVPN | DNSConfigured, TunnelCreated](
                 on_event=on_event,
@@ -242,6 +250,8 @@ class Client:
         veth_cidr: str | None = None,
         kill_switch: bool = True,
         ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
+        dns_overrides: dict[str, list[str]] | None = None,
+        extra_routes: list[str] | None = None,
         on_ready: Callable[[], None] | None = None,
         on_config_used: Callable[[ConfigUsed], None] | None = None,
         on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None,
@@ -259,6 +269,8 @@ class Client:
         veth_cidr: str | None = None,
         kill_switch: bool = True,
         ports_to_forward_from_vpeer_to_loopback: list[int] | None = None,
+        dns_overrides: dict[str, list[str]] | None = None,
+        extra_routes: list[str] | None = None,
         on_ready: Callable[[], None] | None = None,
         on_config_used: Callable[[ConfigUsed], None] | None = None,
         on_tunnel_status_updated: Callable[[TunnelInfo], None] | None = None,
@@ -274,6 +286,8 @@ class Client:
             kill_switch = config.kill_switch
             rebind_ports_every = config.rebind_ports_every
             ports_to_forward_from_vpeer_to_loopback = config.ports_to_forward_from_vpeer_to_loopback
+            dns_overrides = config.dns_overrides or None
+            extra_routes = config.extra_routes or None
         else:
             name = name_or_config
 
@@ -321,6 +335,8 @@ class Client:
                 veth_cidr=veth_cidr,
                 kill_switch=kill_switch,
                 ports_to_forward_from_vpeer_to_loopback=ports_to_forward_from_vpeer_to_loopback or [],
+                dns_overrides=dns_overrides or {},
+                extra_routes=extra_routes or [],
             ),
             handler=ResponseHandler[ConfigUsed | TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated | PortsRebound, TunnelStopped](
                 on_event=on_event,
