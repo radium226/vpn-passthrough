@@ -26,9 +26,10 @@ from radium226.vpn_passthrough.app.commands._helpers import pass_config_folder, 
 @click.option("--backend-name", "backend_name", default=None, envvar="VPN_PASSTHROUGH_BACKEND", help="Backend name as configured in config file.")
 @click.option("--configure-with", "configure_with", default=None, type=click.Path(), help="Script to run after port rebind and before process restart; receives tunnel context as JSON on stdin.")
 @click.option("--kill-switch", "kill_switch", type=click.Choice(["yes", "no"]), default=None, help="Block all traffic that bypasses the VPN tunnel (default: yes). Only applies when creating a temporary tunnel.")
+@click.option("--drop-caps/--no-drop-caps", "drop_caps", default=True, help="Run without ambient capabilities (default: yes). Required for tools that create their own user namespaces (e.g. bwrap, podman).")
 @click.argument("command", nargs=-1, required=True)
 @pass_config_folder
-def run_process(config_folder_path: Path | None, kill_with: int | None, tunnel_name: str | None, region_id: str | None, backend_name: str | None, configure_with: str | None, kill_switch: str | None, command: tuple[str, ...]) -> None:
+def run_process(config_folder_path: Path | None, kill_with: int | None, tunnel_name: str | None, region_id: str | None, backend_name: str | None, configure_with: str | None, kill_switch: str | None, drop_caps: bool, command: tuple[str, ...]) -> None:
     config = ClientConfig.load(config_folder_path)
     resolved_kill_switch = (kill_switch == "yes") if kill_switch is not None else True
 
@@ -60,6 +61,7 @@ def run_process(config_folder_path: Path | None, kill_with: int | None, tunnel_n
                         tunnel_name=tunnel_info.name,
                         cwd=str(Path.cwd()),
                         gid=os.getgid(),
+                        ambient_capabilities=[] if drop_caps else None,
                         on_pid_received=handle_pid,
                         configure_with=configure_with,
                     )

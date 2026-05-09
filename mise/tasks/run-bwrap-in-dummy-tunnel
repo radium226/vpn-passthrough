@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+set -euEo pipefail
+
+main()
+{
+    local app_dir
+    app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../app" && pwd)"
+
+    uv --directory "${app_dir}" run vpn-passthrough \
+        run-process \
+            --in-tunnel="dummy" \
+            -- \
+            bwrap \
+                --ro-bind /usr /usr \
+                --ro-bind /lib /lib \
+                --ro-bind /lib64 /lib64 \
+                --proc /proc \
+                --dev /dev \
+                --tmpfs /tmp \
+                --unshare-all \
+                /usr/bin/true
+}
+
+main "${@}"

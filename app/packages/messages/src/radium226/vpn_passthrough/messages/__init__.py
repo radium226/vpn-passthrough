@@ -42,7 +42,7 @@ class RunProcess(BaseModel, Request[ProcessTerminated | CommandNotFound, Process
     cwd: str | None = None
     username: str | None = None
     gid: int | None = None
-    ambient_capabilities: list[int] = []
+    ambient_capabilities: list[int] | None = None
     client_pid: int | None = None
     env: dict[str, str] = {}
     configure_with: str | None = None

@@ -78,7 +78,7 @@ def _parse_cgroupv2_path(client_pid: int) -> str | None:
     return None
 
 
-def make_preexec_fn(username: str, ns_pid: int, cwd: str | None = None, client_pid: int | None = None) -> tuple[Callable[[], None], Callable[[], None]]:
+def make_preexec_fn(username: str, ns_pid: int, cwd: str | None = None, client_pid: int | None = None, ambient_capabilities: frozenset[int] | None = None) -> tuple[Callable[[], None], Callable[[], None]]:
     """
     Return (preexec_fn, close_parent_fds).
 
@@ -172,9 +172,10 @@ def make_preexec_fn(username: str, ns_pid: int, cwd: str | None = None, client_p
         os.initgroups(username, gid)
         os.setuid(uid)
 
-        # 5. Build a capability mask matching default Docker/Podman containers
+        # 5. Build a capability mask — None means use the default container set
+        caps_to_use = _CONTAINER_CAPS if ambient_capabilities is None else ambient_capabilities
         cap_mask = [0, 0]
-        for cap in _CONTAINER_CAPS:
+        for cap in caps_to_use:
             cap_mask[cap // 32] |= 1 << (cap % 32)
 
         header = _CapHeader(version=_LINUX_CAPABILITY_VERSION_3, pid=0)
@@ -187,8 +188,8 @@ def make_preexec_fn(username: str, ns_pid: int, cwd: str | None = None, client_p
         if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
             raise OSError(ctypes.get_errno(), "capset failed")
 
-        # 6. Raise container caps as ambient
-        for cap in _CONTAINER_CAPS:
+        # 6. Raise selected caps as ambient
+        for cap in caps_to_use:
             if libc.prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, cap, 0, 0) != 0:
                 raise OSError(ctypes.get_errno(), f"prctl(PR_CAP_AMBIENT_RAISE, {cap}) failed")
 

@@ -82,6 +82,7 @@ class Client:
         cwd: str | None = None,
         username: str | None = None,
         gid: int | None = None,
+        ambient_capabilities: list[int] | None = None,
         on_pid_received: Callable[[int], Awaitable[None]] | None = None,
         configure_with: str | None = None,
     ) -> int:
@@ -116,6 +117,7 @@ class Client:
                 cwd=cwd,
                 username=username or getpass.getuser(),
                 gid=gid,
+                ambient_capabilities=ambient_capabilities,
                 client_pid=os.getpid(),
                 env=dict(os.environ),
                 configure_with=configure_with,

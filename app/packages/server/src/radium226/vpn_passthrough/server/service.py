@@ -272,15 +272,21 @@ class Service():
         tunnel_name = request.tunnel_name
         if tunnel_name not in self.namespaces:
             logger.info("Lazily creating tunnel {} for process", tunnel_name)
-            await self._setup_tunnel(tunnel_name, None, [], emit, client_pid=request.client_pid)
+
+            async def _discard_emit(event: Any, fds: list[int]) -> None:
+                pass
+
+            await self._setup_tunnel(tunnel_name, None, [], _discard_emit, client_pid=request.client_pid)
 
         namespace = self.namespaces[tunnel_name]
 
+        ambient_caps = frozenset(request.ambient_capabilities) if request.ambient_capabilities is not None else None
         preexec_fn, close_parent_fds = make_preexec_fn(
             request.username,
             namespace.pid,
             cwd=request.cwd,
             client_pid=request.client_pid,
+            ambient_capabilities=ambient_caps,
         )
 
         first = True
