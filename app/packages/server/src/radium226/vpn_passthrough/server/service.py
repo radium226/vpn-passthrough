@@ -587,9 +587,6 @@ class Service():
     ) -> tuple[TunnelDestroyed, list[int]]:
         self._shutting_down.add(request.name)
         try:
-            self.namespaces.pop(request.name, None)
-            self.tunnel_contexts.pop(request.name, None)
-            self.processes.pop(request.name, None)
             active_procs = self._active_processes.pop(request.name, {})
             self._tunnel_rebind_waiters.pop(request.name, None)
 
@@ -605,6 +602,13 @@ class Service():
                 procs = list(active_procs.values())
                 if procs:
                     await asyncio.gather(*[p.wait() for p in procs])
+
+            # Only remove the tunnel from bookkeeping (and thus from list-tunnels)
+            # once we're actually done waiting — the namespace and its processes
+            # are still alive up to this point.
+            self.namespaces.pop(request.name, None)
+            self.tunnel_contexts.pop(request.name, None)
+            self.processes.pop(request.name, None)
 
             # Unblock handle_start_tunnel (and thus the client) before the slow
             # stack teardown so the client sees the stop immediately.
