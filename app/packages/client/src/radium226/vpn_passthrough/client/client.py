@@ -386,7 +386,7 @@ class Client:
             raise KeyError(f"Tunnel {name!r} not found")
         return info
 
-    async def destroy_tunnel(self, name: str) -> None:
+    async def destroy_tunnel(self, name: str, *, wait: bool = False) -> None:
         loop = asyncio.get_running_loop()
         done: asyncio.Future[None] = loop.create_future()
 
@@ -394,7 +394,7 @@ class Client:
             done.set_result(None)
 
         await self.ipc.request(
-            DestroyTunnel(id=str(uuid.uuid4()), name=name),
+            DestroyTunnel(id=str(uuid.uuid4()), name=name, wait=wait),
             handler=ResponseHandler[Never, TunnelDestroyed](on_response=on_response),
             fds=[],
         )

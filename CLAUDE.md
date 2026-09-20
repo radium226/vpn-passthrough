@@ -70,7 +70,7 @@ Three layers — **transport**, **protocol**, and **server/client**:
     - `KillProcess(Request[ProcessKilled, Never])`
     - `CreateTunnel(Request[TunnelCreated, ConnectedToVPN | DNSConfigured])` with `names_of_ports_to_forward`, `backend_name`, `veth_cidr`, `ports_to_forward_from_vpeer_to_loopback`
     - `StartTunnel(Request[TunnelStopped, ConfigUsed | TunnelStarted | ConnectedToVPN | DNSConfigured | TunnelStatusUpdated | PortsRebound])` with `rebind_ports_every` support
-    - `DestroyTunnel(Request[TunnelDestroyed, Never])`
+    - `DestroyTunnel(Request[TunnelDestroyed, Never])` with `wait` (wait for running processes in the tunnel to exit before tearing it down)
     - `ListRegions(Request[RegionsListed, Never])` with optional `backend_name`
     - `ListTunnels(Request[TunnelsListed, Never])`
   - **Responses:** `ProcessTerminated`, `CommandNotFound`, `ProcessKilled`, `TunnelCreated`, `TunnelDestroyed`, `TunnelStopped`, `RegionsListed`, `TunnelsListed`
@@ -93,7 +93,7 @@ Three layers — **transport**, **protocol**, and **server/client**:
 
 ### Client Package (app/packages/client)
 
-- `client.py` — `Client` class: `Client.connect(config)` async context manager (accepts `ClientConfig` or `Path`); `run_process()` sends `RunProcess` and returns exit code (127 for `CommandNotFound`); `kill_process(pid, signal)` sends `KillProcess`; `create_tunnel()` sends `CreateTunnel` and returns `TunnelCreated`; `start_tunnel()` sends `StartTunnel` with callbacks for `ConfigUsed`, `TunnelStatusUpdated`, `PortsRebound` events; `destroy_tunnel()` sends `DestroyTunnel`; `list_regions()` sends `ListRegions` with optional `backend_name`; `list_tunnels()` sends `ListTunnels`; `lookup_tunnel()` looks up a tunnel by name from `list_tunnels()`.
+- `client.py` — `Client` class: `Client.connect(config)` async context manager (accepts `ClientConfig` or `Path`); `run_process()` sends `RunProcess` and returns exit code (127 for `CommandNotFound`); `kill_process(pid, signal)` sends `KillProcess`; `create_tunnel()` sends `CreateTunnel` and returns `TunnelCreated`; `start_tunnel()` sends `StartTunnel` with callbacks for `ConfigUsed`, `TunnelStatusUpdated`, `PortsRebound` events; `destroy_tunnel(name, *, wait=False)` sends `DestroyTunnel`; `list_regions()` sends `ListRegions` with optional `backend_name`; `list_tunnels()` sends `ListTunnels`; `lookup_tunnel()` looks up a tunnel by name from `list_tunnels()`.
 - `config.py` — `ClientConfig` (pydantic model): `socket_file_path`. `ClientConfig.load(folder_path)` reads from `{folder}/client.yaml`. `TunnelConfig` (pydantic model): `name`, `region_id`, `names_of_ports_to_forward`, `backend_name`, `veth_cidr`, `rebind_ports_every`, `ports_to_forward_from_vpeer_to_loopback`. `TunnelConfig.load_all(folder_path)` reads all YAML files from `{folder}/tunnels/`.
 
 ### VPN Package (app/packages/vpn)
@@ -119,7 +119,7 @@ Standalone utility for connecting a named netns to PIA VPN. All internal modules
 - `commands/start_server.py` — Loads `ServerConfig`, starts `Server.listen()`, sends `sd_notify("READY=1")`.
 - `commands/start_tunnel.py` — Loads `ClientConfig` and `TunnelConfig`, sends `StartTunnel`; sends `sd_notify` for systemd readiness and status updates. Suitable for use as a systemd service.
 - `commands/create_tunnel.py` — Loads `ClientConfig` and `TunnelConfig`, sends `CreateTunnel`, blocks until SIGINT/SIGTERM then destroys.
-- `commands/destroy_tunnel.py` — Sends `DestroyTunnel`.
+- `commands/destroy_tunnel.py` — Sends `DestroyTunnel`. `--wait` waits for the tunnel's running processes to exit before tearing it down.
 - `commands/run_process.py` — Sends `RunProcess` with dup'd stdin/stdout/stderr fds; SIGINT/SIGTERM forwarded via `kill_process()`. Supports `--in-tunnel`, `--region-id`, `--backend-name`, `--configure-with`.
 - `commands/debug_tunnel.py` — Opens a PTY, runs bash inside a tunnel with raw terminal mode and SIGWINCH forwarding.
 - `commands/list_tunnels.py` — Sends `ListTunnels`; table or JSON output. `--with-processes` adds process info.

@@ -176,6 +176,7 @@ class StartTunnel(BaseModel, Request["TunnelStopped", "ConfigUsed | TunnelStarte
 class DestroyTunnel(BaseModel, Request[TunnelDestroyed, Never]):
     id: str
     name: str
+    wait: bool = False
     type: Literal["destroy_tunnel"] = "destroy_tunnel"
 
 

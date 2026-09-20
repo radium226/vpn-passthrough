@@ -116,6 +116,8 @@ class Service():
         self._tunnel_emit_fns: dict[TunnelName, Any] = {}  # Emit[TunnelStatusUpdated]
         self._tunnel_rebind_waiters: dict[TunnelName, set[asyncio.Future[None]]] = {}
         self._tunnel_rebind_tasks: dict[TunnelName, asyncio.Task[None]] = {}
+        self._active_processes: dict[TunnelName, dict[int, asyncio.subprocess.Process]] = {}
+        self._shutting_down: set[TunnelName] = set()
 
     @classmethod
     @asynccontextmanager
@@ -276,6 +278,15 @@ class Service():
             raise ValueError("RunProcess requires username")
 
         tunnel_name = request.tunnel_name
+        if tunnel_name in self._shutting_down:
+            logger.warning("Rejecting RunProcess for tunnel {} (shutting down)", tunnel_name)
+            for fd in (stdin_fd, stdout_fd, stderr_fd):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            return ProcessTerminated(request_id=request.id, exit_code=1), []
+
         if tunnel_name not in self.namespaces:
             logger.info("Lazily creating tunnel {} for process", tunnel_name)
 
@@ -392,6 +403,7 @@ class Service():
                 return CommandNotFound(request_id=request.id, command=command), []
 
             self.processes[tunnel_name][process.pid] = ProcessInfo(pid=process.pid, command=command, args=args)
+            self._active_processes.setdefault(tunnel_name, {})[process.pid] = process
             await self._notify_tunnel_updated(tunnel_name)
 
             if first:
@@ -416,6 +428,7 @@ class Service():
                     wait_task.cancel()
                     if rebind_future in done:
                         self.processes.get(tunnel_name, {}).pop(process.pid, None)
+                        self._active_processes.get(tunnel_name, {}).pop(process.pid, None)
                         await self._notify_tunnel_updated(tunnel_name)
                         logger.info("Restarting process {} in tunnel {} due to port rebind", process.pid, tunnel_name)
                         os.killpg(os.getpgid(process.pid), kill_signal)
@@ -433,6 +446,7 @@ class Service():
 
         close_parent_fds()
         self.processes.get(tunnel_name, {}).pop(process.pid, None)
+        self._active_processes.get(tunnel_name, {}).pop(process.pid, None)
         await self._notify_tunnel_updated(tunnel_name)
         for fd in (stdin_fd, stdout_fd, stderr_fd):
             try:
@@ -571,32 +585,42 @@ class Service():
         fds: list[int],
         emit: Emit[Never],
     ) -> tuple[TunnelDestroyed, list[int]]:
-        self.namespaces.pop(request.name, None)
-        self.tunnel_contexts.pop(request.name, None)
-        self.processes.pop(request.name, None)
-        self._tunnel_rebind_waiters.pop(request.name, None)
+        self._shutting_down.add(request.name)
+        try:
+            self.namespaces.pop(request.name, None)
+            self.tunnel_contexts.pop(request.name, None)
+            self.processes.pop(request.name, None)
+            active_procs = self._active_processes.pop(request.name, {})
+            self._tunnel_rebind_waiters.pop(request.name, None)
 
-        rebind_task = self._tunnel_rebind_tasks.pop(request.name, None)
-        if rebind_task is not None:
-            rebind_task.cancel()
-            try:
-                await rebind_task
-            except asyncio.CancelledError:
-                pass
+            rebind_task = self._tunnel_rebind_tasks.pop(request.name, None)
+            if rebind_task is not None:
+                rebind_task.cancel()
+                try:
+                    await rebind_task
+                except asyncio.CancelledError:
+                    pass
 
-        # Unblock handle_start_tunnel (and thus the client) before the slow
-        # stack teardown so the client sees the stop immediately.
-        stop = self._tunnel_stop_signals.get(request.name)
-        if stop is not None and not stop.done():
-            stop.set_result(None)
+            if request.wait:
+                procs = list(active_procs.values())
+                if procs:
+                    await asyncio.gather(*[p.wait() for p in procs])
 
-        stack = self.exit_stacks.pop(request.name, None)
-        if stack is not None:
-            await stack.aclose()
-        logger.info("Tunnel {} destroyed", request.name)
-        if self._on_tunnels_changed is not None:
-            self._on_tunnels_changed(self._current_tunnels())
-        return TunnelDestroyed(request_id=request.id, name=request.name), []
+            # Unblock handle_start_tunnel (and thus the client) before the slow
+            # stack teardown so the client sees the stop immediately.
+            stop = self._tunnel_stop_signals.get(request.name)
+            if stop is not None and not stop.done():
+                stop.set_result(None)
+
+            stack = self.exit_stacks.pop(request.name, None)
+            if stack is not None:
+                await stack.aclose()
+            logger.info("Tunnel {} destroyed", request.name)
+            if self._on_tunnels_changed is not None:
+                self._on_tunnels_changed(self._current_tunnels())
+            return TunnelDestroyed(request_id=request.id, name=request.name), []
+        finally:
+            self._shutting_down.discard(request.name)
 
 
 
