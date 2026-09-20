@@ -185,6 +185,8 @@ class Service():
         dns_overrides: dict[str, list[str]] | None = None,
         extra_routes: list[str] | None = None,
     ) -> None:
+        if tunnel_name in self.namespaces:
+            raise ValueError(f"Tunnel {tunnel_name!r} already exists")
         self._tunnel_rebind_waiters[tunnel_name] = set()
         stack = AsyncExitStack()
         try:
@@ -215,7 +217,11 @@ class Service():
                 for port_name in names_of_ports_to_forward:
                     port = await stack.enter_async_context(session.forward_port())
                     forwarded_ports[port_name] = port
-                remote_ip = await self._fetch_remote_ip(namespace)
+                try:
+                    remote_ip = await self._fetch_remote_ip(namespace)
+                except Exception as exc:
+                    logger.warning("Failed to verify remote IP for tunnel {}, leaving it unknown: {}", tunnel_name, exc)
+                    remote_ip = ""
                 logger.info("Connected to VPN in tunnel {} (gateway={}, remote_ip={})", tunnel_name, session.gateway_ip, remote_ip)
                 await emit(ConnectedToVPN(remote_ip=remote_ip, gateway_ip=session.gateway_ip, tun_ip=session.tun_ip, forwarded_ports=forwarded_ports), [])
                 self.tunnel_contexts[tunnel_name] = _TunnelContext(
@@ -409,7 +415,7 @@ class Service():
                     )
                     wait_task.cancel()
                     if rebind_future in done:
-                        self.processes[tunnel_name].pop(process.pid, None)
+                        self.processes.get(tunnel_name, {}).pop(process.pid, None)
                         await self._notify_tunnel_updated(tunnel_name)
                         logger.info("Restarting process {} in tunnel {} due to port rebind", process.pid, tunnel_name)
                         os.killpg(os.getpgid(process.pid), kill_signal)
@@ -426,7 +432,7 @@ class Service():
                 break
 
         close_parent_fds()
-        self.processes[tunnel_name].pop(process.pid, None)
+        self.processes.get(tunnel_name, {}).pop(process.pid, None)
         await self._notify_tunnel_updated(tunnel_name)
         for fd in (stdin_fd, stdout_fd, stderr_fd):
             try:

@@ -6,7 +6,7 @@ from typing import AsyncIterator, Any, Never, get_args, get_origin, Union
 
 from loguru import logger
 
-from .protocol import Codec, Request, Response, ResponseHandler, validate_response, _resolve_type
+from .protocol import Codec, ErrorResponse, Request, RequestFailedError, Response, ResponseHandler, validate_response, _resolve_type
 from .transport import Connection, Frame, Framing, NullCharFraming, open_connection
 
 
@@ -97,11 +97,15 @@ class Client[RequestT: Request, EventT, ResponseT: Response]():
                             entry = self._pending.pop(response.request_id, None)
                             if entry is not None:
                                 future, original_request, response_handler = entry
-                                validate_response(original_request, response)
-                                if response_handler.on_response is not None:
-                                    await response_handler.on_response(response, frame.fds)
-                                if not future.done():
-                                    future.set_result(None)
+                                if isinstance(response, ErrorResponse):
+                                    if not future.done():
+                                        future.set_exception(RequestFailedError(response.error_type, response.message))
+                                else:
+                                    validate_response(original_request, response)
+                                    if response_handler.on_response is not None:
+                                        await response_handler.on_response(response, frame.fds)
+                                    if not future.done():
+                                        future.set_result(None)
                         case event:
                             request_ids = self._event_routing.get(type(event), [])
                             for request_id in list(request_ids):

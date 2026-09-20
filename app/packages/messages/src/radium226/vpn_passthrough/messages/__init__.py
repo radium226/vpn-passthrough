@@ -209,12 +209,20 @@ class ListTunnels(BaseModel, Request[TunnelsListed, Never]):
     type: Literal["list_tunnels"] = "list_tunnels"
 
 
-type _Response = Annotated[ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed, Discriminator("type")]
+class RequestFailed(BaseModel):
+    """Generic error response: sent back for any request whose handler raised an exception."""
+    request_id: str
+    error_type: str
+    message: str
+    type: Literal["request_failed"] = "request_failed"
+
+
+type _Response = Annotated[ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed | RequestFailed, Discriminator("type")]
 type _Event = ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | ConfigUsed | TunnelStarted | TunnelStatusUpdated | PortsRebound
 
 _TYPE_ADAPTER = TypeAdapter(
     Annotated[
-        RunProcess | KillProcess | CreateTunnel | StartTunnel | DestroyTunnel | ListRegions | ListTunnels | ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | ConfigUsed | TunnelStarted | TunnelStatusUpdated | PortsRebound | ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed,
+        RunProcess | KillProcess | CreateTunnel | StartTunnel | DestroyTunnel | ListRegions | ListTunnels | ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | ConfigUsed | TunnelStarted | TunnelStatusUpdated | PortsRebound | ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed | RequestFailed,
         Discriminator("type"),
     ]
 )
@@ -228,7 +236,12 @@ def _decode(data: bytes) -> RunProcess | KillProcess | CreateTunnel | StartTunne
     return _TYPE_ADAPTER.validate_json(data.decode())
 
 
-CODEC = Codec[RunProcess | KillProcess | CreateTunnel | StartTunnel | DestroyTunnel | ListRegions | ListTunnels, ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | ConfigUsed | TunnelStarted | TunnelStatusUpdated | PortsRebound, ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed](
+def _encode_error(request_id: str, exc: BaseException) -> RequestFailed:
+    return RequestFailed(request_id=request_id, error_type=type(exc).__name__, message=str(exc))
+
+
+CODEC = Codec[RunProcess | KillProcess | CreateTunnel | StartTunnel | DestroyTunnel | ListRegions | ListTunnels, ProcessStarted | ProcessRestarted | ConnectedToVPN | DNSConfigured | ConfigUsed | TunnelStarted | TunnelStatusUpdated | PortsRebound, ProcessTerminated | CommandNotFound | ProcessKilled | TunnelCreated | TunnelDestroyed | TunnelStopped | RegionsListed | TunnelsListed | RequestFailed](
     encode=_encode,
     decode=_decode,
+    encode_error=_encode_error,
 )

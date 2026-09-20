@@ -7,7 +7,7 @@ import pytest
 from pydantic import BaseModel, Discriminator, TypeAdapter
 
 from radium226.vpn_passthrough.ipc.ipc import open_client, open_server
-from radium226.vpn_passthrough.ipc.protocol import Codec, Emit, Request, RequestHandler, ResponseHandler
+from radium226.vpn_passthrough.ipc.protocol import Codec, Emit, Request, RequestFailedError, RequestHandler, ResponseHandler
 
 
 # -- Test messages --
@@ -42,7 +42,14 @@ class Work(BaseModel, Request[Done, Progress]):
     type: Literal["work"] = "work"
 
 
-_ALL_TYPES = Ping | Pong | Work | Done | Progress
+class Failed(BaseModel):
+    request_id: str
+    error_type: str
+    message: str
+    type: Literal["failed"] = "failed"
+
+
+_ALL_TYPES = Ping | Pong | Work | Done | Progress | Failed
 _TYPE_ADAPTER = TypeAdapter(Annotated[_ALL_TYPES, Discriminator("type")])
 
 
@@ -54,7 +61,11 @@ def _decode(data: bytes) -> _ALL_TYPES:
     return _TYPE_ADAPTER.validate_json(data.decode())
 
 
-CODEC = Codec[Ping | Work, Progress, Pong | Done](encode=_encode, decode=_decode)
+def _encode_error(request_id: str, exc: BaseException) -> Failed:
+    return Failed(request_id=request_id, error_type=type(exc).__name__, message=str(exc))
+
+
+CODEC = Codec[Ping | Work, Progress, Pong | Done | Failed](encode=_encode, decode=_decode, encode_error=_encode_error)
 
 
 @pytest.fixture
@@ -204,3 +215,35 @@ async def test_events_are_bound_to_their_request(socket_path: Path):
 
         assert events_a == [50, 100]
         assert events_b == [25, 50, 75, 100]
+
+
+@pytest.mark.asyncio
+async def test_handler_exception_returns_error_response_and_keeps_connection_open(socket_path: Path):
+    async def handle_ping(request: Ping, fds: list[int], emit: Emit[Never]) -> tuple[Pong, list[int]]:
+        if request.value == "boom":
+            raise ValueError("kaboom")
+        return Pong(request_id=request.id, value=request.value.upper()), []
+
+    async with open_server(socket_path, CODEC, handlers=[RequestHandler(request_type=Ping, on_request=handle_ping)]):
+        async with open_client(socket_path, CODEC) as client:
+            with pytest.raises(RequestFailedError) as exc_info:
+                await client.request(Ping(id="1", value="boom"))
+
+            assert exc_info.value.error_type == "ValueError"
+            assert exc_info.value.message == "kaboom"
+
+            # the connection must still be usable for further requests
+            result_value = ""
+
+            async def on_response(response: Pong | Done, fds: list[int]) -> None:
+                nonlocal result_value
+                match response:
+                    case Pong(value=v):
+                        result_value = v
+
+            await client.request(
+                Ping(id="2", value="hello"),
+                handler=ResponseHandler(on_response=on_response),
+            )
+
+            assert result_value == "HELLO"

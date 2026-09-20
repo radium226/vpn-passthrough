@@ -31,6 +31,23 @@ class Response(Protocol):
     request_id: str
 
 
+@runtime_checkable
+class ErrorResponse(Protocol):
+    """Structural protocol: a `Response` that reports a handler-side failure."""
+    request_id: str
+    error_type: str
+    message: str
+
+
+class RequestFailedError(Exception):
+    """Raised on the client when the server reports that a request's handler failed."""
+
+    def __init__(self, error_type: str, message: str) -> None:
+        super().__init__(f"{error_type}: {message}")
+        self.error_type = error_type
+        self.message = message
+
+
 def _type_name(t: Any) -> str:
     if hasattr(t, "__name__"):
         return t.__name__
@@ -99,10 +116,14 @@ type Encode[MessageT] = Callable[[MessageT], bytes]
 type Decode[MessageT] = Callable[[bytes], MessageT]
 
 
+type EncodeError[ResponseT] = Callable[[str, BaseException], ResponseT]
+
+
 @dataclass
 class Codec[RequestT: Request, EventT, ResponseT: Response]():
     encode: Encode[RequestT | EventT | ResponseT]
     decode: Decode[RequestT | EventT | ResponseT]
+    encode_error: EncodeError[ResponseT] | None = None
 
 
 type OnEvent[EventT] = Callable[[EventT, list[int]], Awaitable[None]]

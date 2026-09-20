@@ -60,9 +60,18 @@ class Server[RequestT: Request, EventT, ResponseT: Response]():
                                 await connection.send_frame(
                                     Frame(self._codec.encode(response), response_fds)
                                 )
-                            except Exception:
+                            except Exception as exc:
                                 logger.exception("Handler raised an exception for request {} (id={})", type(request).__name__, request.id)
-                                await connection.aclose()
+                                if self._codec.encode_error is None:
+                                    await connection.aclose()
+                                    return
+                                error_response = self._codec.encode_error(request.id, exc)
+                                try:
+                                    await connection.send_frame(
+                                        Frame(self._codec.encode(error_response), [])
+                                    )
+                                except (OSError, EOFError):
+                                    logger.warning("Client disconnected before error response could be sent for request {}", request.id)
 
                         asyncio.create_task(handle_request(request, frame.fds))
 
