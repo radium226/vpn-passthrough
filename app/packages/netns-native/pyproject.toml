@@ -1,0 +1,13 @@
+[project]
+name = "radium226-vpn-passthrough-netns-native"
+version = "0.1.0"
+requires-python = ">=3.13"
+
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+module-name = "radium226.vpn_passthrough.netns_native.netns_native"
+manifest-path = "Cargo.toml"
+python-source = "python"

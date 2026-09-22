@@ -4,7 +4,8 @@ from typing import AsyncIterator
 
 from loguru import logger
 
-from ._run import run
+from radium226.vpn_passthrough.nftables_native import nftables_native
+
 from .namespace import Namespace
 from .network_interfaces import NetworkInterfaces
 
@@ -20,53 +21,30 @@ class DNSLeakGuard:
         # Host-side table: block DNS forwarding from the veth interface.
         # This is reliable because it runs on the host with full CAP_NET_ADMIN.
         host_table_name = f"dns_leak_guard_{ni.veth}"
-        host_ruleset = (
-            f"table inet {host_table_name} {{\n"
-            f"    chain forward {{\n"
-            f"        type filter hook forward priority filter; policy accept;\n"
-            f'        iifname "{ni.veth}" meta l4proto {{ tcp, udp }} th dport 53 drop\n'
-            f"    }}\n"
-            f"}}\n"
-        )
-
-        host_process = await asyncio.create_subprocess_exec(
-            "nft", "-f", "-",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await host_process.communicate(input=host_ruleset.encode())
-        if host_process.returncode != 0:
-            raise RuntimeError(f"Failed to install host-side dns_leak_guard nftables rules (exit code {host_process.returncode})")
+        try:
+            await asyncio.to_thread(
+                nftables_native.install_dns_leak_guard_host, host_table_name, ni.veth
+            )
+        except OSError as e:
+            raise RuntimeError(f"Failed to install host-side dns_leak_guard nftables rules: {e}") from e
 
         # Netns-internal table: best-effort defense-in-depth.
         # May fail due to user namespace capability issues.
         netns_installed = False
-        netns_ruleset = (
-            f"table inet {NETNS_TABLE_NAME} {{\n"
-            f"    chain output {{\n"
-            f"        type filter hook output priority 0; policy accept;\n"
-            f'        oifname "{ni.vpeer}" meta l4proto {{ tcp, udp }} th dport 53 drop\n'
-            f"    }}\n"
-            f"}}\n"
-        )
-
-        netns_process = await asyncio.create_subprocess_exec(
-            "nft", "-f", "-",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            preexec_fn=namespace.enter,
-        )
-        stdout, stderr = await netns_process.communicate(input=netns_ruleset.encode())
-        if netns_process.returncode != 0:
-            logger.warning(f"Failed to install namespace-internal dns_leak_guard rules (exit code {netns_process.returncode}): {stderr.decode().strip()}")
-        else:
+        try:
+            await asyncio.to_thread(
+                nftables_native.install_dns_leak_guard_netns,
+                NETNS_TABLE_NAME, ni.vpeer, namespace.pid,
+            )
             netns_installed = True
+        except OSError as e:
+            logger.warning(f"Failed to install namespace-internal dns_leak_guard rules: {e}")
 
         try:
             yield
         finally:
             if netns_installed:
-                await run(["nft", "delete", "table", "inet", NETNS_TABLE_NAME], preexec_fn=namespace.enter)
-            await run(["nft", "delete", "table", "inet", host_table_name])
+                await asyncio.to_thread(
+                    nftables_native.delete_table_in_netns, NETNS_TABLE_NAME, namespace.pid
+                )
+            await asyncio.to_thread(nftables_native.delete_table, host_table_name)

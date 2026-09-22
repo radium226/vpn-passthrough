@@ -1,9 +1,11 @@
+import asyncio
 import hashlib
 import ipaddress
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from ._run import run
+from radium226.vpn_passthrough.netns_native import netns_native
+
 from .namespace import Namespace
 
 
@@ -58,23 +60,21 @@ class NetworkInterfaces:
         veth = f"vpt{slot}v"
         vpeer = f"vpt{slot}p"
 
-        # Create veth pair in host namespace, then move peer into the namespace by PID
-        await run(["ip", "link", "add", veth, "type", "veth", "peer", "name", vpeer], check=True)
+        # Create the veth pair, configure both ends, and move the peer into
+        # the namespace — all via netlink (see the netns-native package)
+        # rather than shelling out to `ip`.
+        await asyncio.to_thread(
+            netns_native.add_veth_pair,
+            veth=veth,
+            vpeer=vpeer,
+            veth_ip=resolved_veth_ip,
+            vpeer_ip=resolved_vpeer_ip,
+            prefix_len=prefix_len,
+            netns_pid=namespace.pid,
+            extra_routes=extra_routes or [],
+        )
         try:
-            await run(["ip", "link", "set", vpeer, "netns", str(namespace.pid)], check=True)
-
-            # Configure host side
-            await run(["ip", "addr", "add", f"{resolved_veth_ip}/{prefix_len}", "dev", veth], check=True)
-            await run(["ip", "link", "set", veth, "up"], check=True)
-
-            # Configure namespace side
-            await run(["ip", "addr", "add", f"{resolved_vpeer_ip}/{prefix_len}", "dev", vpeer], check=True, preexec_fn=namespace.enter)
-            await run(["ip", "link", "set", vpeer, "up"], check=True, preexec_fn=namespace.enter)
-            await run(["ip", "link", "set", "lo", "up"], check=True, preexec_fn=namespace.enter)
-            await run(["ip", "route", "add", "default", "via", resolved_veth_ip], check=True, preexec_fn=namespace.enter)
-            for route in (extra_routes or []):
-                await run(["ip", "route", "add", route, "via", resolved_veth_ip], check=True, preexec_fn=namespace.enter)
-
             yield NetworkInterfaces(name, veth, vpeer, resolved_veth_ip, resolved_vpeer_ip, prefix_len)
         finally:
-            await run(["ip", "link", "delete", veth])
+            # Deleting the host end also removes its peer.
+            await asyncio.to_thread(netns_native.delete_link, veth)

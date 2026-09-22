@@ -9,6 +9,8 @@ members = [
     "radium226-vpn-passthrough-dummy",
     "radium226-vpn-passthrough-ipc",
     "radium226-vpn-passthrough-messages",
+    "radium226-vpn-passthrough-netns-native",
+    "radium226-vpn-passthrough-nftables-native",
     "radium226-vpn-passthrough-pia",
     "radium226-vpn-passthrough-server",
     "radium226-vpn-passthrough-vpn",
@@ -486,6 +488,16 @@ dev = [
 ]
 
 [[package]]
+name = "radium226-vpn-passthrough-netns-native"
+version = "0.1.0"
+source = { editable = "packages/netns-native" }
+
+[[package]]
+name = "radium226-vpn-passthrough-nftables-native"
+version = "0.1.0"
+source = { editable = "packages/nftables-native" }
+
+[[package]]
 name = "radium226-vpn-passthrough-pia"
 version = "0.1.0"
 source = { editable = "packages/pia" }
@@ -527,6 +539,8 @@ dependencies = [
     { name = "loguru" },
     { name = "radium226-vpn-passthrough-ipc" },
     { name = "radium226-vpn-passthrough-messages" },
+    { name = "radium226-vpn-passthrough-netns-native" },
+    { name = "radium226-vpn-passthrough-nftables-native" },
     { name = "radium226-vpn-passthrough-vpn" },
 ]
 
@@ -544,6 +558,8 @@ requires-dist = [
     { name = "loguru" },
     { name = "radium226-vpn-passthrough-ipc", editable = "packages/ipc" },
     { name = "radium226-vpn-passthrough-messages", editable = "packages/messages" },
+    { name = "radium226-vpn-passthrough-netns-native", editable = "packages/netns-native" },
+    { name = "radium226-vpn-passthrough-nftables-native", editable = "packages/nftables-native" },
     { name = "radium226-vpn-passthrough-vpn", editable = "packages/vpn" },
 ]
 

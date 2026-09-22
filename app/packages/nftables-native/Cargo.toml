@@ -1,0 +1,14 @@
+[package]
+name = "radium226-vpn-passthrough-nftables-native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nftables_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.29", features = ["extension-module"] }
+rustables = "0.9"
+ipnetwork = "0.21"
+nix = { version = "0.31", features = ["sched", "process"] }
