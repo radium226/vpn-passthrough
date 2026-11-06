@@ -93,8 +93,9 @@ def make_preexec_fn(username: str, ns_pid: int, cwd: str | None = None, client_p
          and join cgroup (failures are logged, not fatal).
       3. PR_SET_KEEPCAPS so permitted caps survive setuid.
       4. setgid/setuid to drop to the real user.
-      5. capset() to restore all permitted caps in effective+inheritable.
-      6. PR_CAP_AMBIENT_RAISE for each permitted cap (inherited by exec).
+      5. chdir() to cwd, with the rights of that user.
+      6. capset() to restore all permitted caps in effective+inheritable.
+      7. PR_CAP_AMBIENT_RAISE for each permitted cap (inherited by exec).
     """
     pw  = pwd.getpwnam(username)
     uid = pw.pw_uid
@@ -172,7 +173,13 @@ def make_preexec_fn(username: str, ns_pid: int, cwd: str | None = None, client_p
         os.initgroups(username, gid)
         os.setuid(uid)
 
-        # 5. Build a capability mask — None means use the default container set
+        # 5. Change working directory as the target user, inside the namespace: before the caps are set, which, all
+        # dropped, would keep even root out of the 0700 home of another user it runs from. Changing to another user
+        # already cleared the effective caps, so that it is checked with their own rights.
+        if cwd is not None:
+            os.chdir(cwd)
+
+        # 6. Build a capability mask — None means use the default container set
         caps_to_use = _CONTAINER_CAPS if ambient_capabilities is None else ambient_capabilities
         cap_mask = [0, 0]
         for cap in caps_to_use:
@@ -188,14 +195,11 @@ def make_preexec_fn(username: str, ns_pid: int, cwd: str | None = None, client_p
         if libc.capset(ctypes.byref(header), ctypes.byref(data)) != 0:
             raise OSError(ctypes.get_errno(), "capset failed")
 
-        # 6. Raise selected caps as ambient
+        # 7. Raise selected caps as ambient
         for cap in caps_to_use:
             if libc.prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, cap, 0, 0) != 0:
                 raise OSError(ctypes.get_errno(), f"prctl(PR_CAP_AMBIENT_RAISE, {cap}) failed")
 
-        # 7. Change working directory as the target user, inside the namespace
-        if cwd is not None:
-            os.chdir(cwd)
 
     def _close_parent_fds() -> None:
         while _parent_fds:
