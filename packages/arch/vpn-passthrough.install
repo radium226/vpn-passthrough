@@ -11,17 +11,25 @@ post_upgrade() {
         fi
     done
     systemctl daemon-reload
-    if systemctl is-active --quiet vpn-passthrough.socket; then
-        systemctl restart vpn-passthrough.socket
-    fi
-    if systemctl is-active --quiet vpn-passthrough; then
-        systemctl restart vpn-passthrough
-    fi
-    while IFS= read -r unit; do
-        systemctl restart "${unit}"
-    done < <(systemctl list-units --type=service --state=active --plain --no-legend --no-pager \
+    # The tunnels go with the daemon, and the socket can't be restarted while the daemon runs: stop them all, then
+    # bring back what was running. The tunnels start in the background, as they wait for their VPN.
+    local socket_was_active=no daemon_was_active=no
+    local -a tunnels
+    { systemctl is-active --quiet vpn-passthrough.socket || systemctl is-enabled --quiet vpn-passthrough.socket; } && socket_was_active=yes
+    systemctl is-active --quiet vpn-passthrough && daemon_was_active=yes
+    mapfile -t tunnels < <(systemctl list-units --type=service --state=active,activating --plain --no-legend --no-pager \
         | awk '{print $1}' \
         | grep -E '^vpn-passthrough@.+\.service$')
+    systemctl stop "${tunnels[@]}" vpn-passthrough.service
+    if [ "${socket_was_active}" = yes ]; then
+        systemctl restart vpn-passthrough.socket
+    fi
+    if [ "${daemon_was_active}" = yes ]; then
+        systemctl start vpn-passthrough.service
+    fi
+    if [ "${#tunnels[@]}" -gt 0 ]; then
+        systemctl start --no-block "${tunnels[@]}"
+    fi
 }
 
 pre_remove() {
