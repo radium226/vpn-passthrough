@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+#MISE description="Upload the built Arch Linux packages to the internal pacman repository"
+#USAGE flag "--url <url>" help="Where the pacman repository is" default="https://repositories.internal/archlinux"
+
+# The repository is the pacman-repo service of self-hosting (see ../self-hosting), which Caddy serves on the WireGuard
+# network: a PUT of NAME-VERSION-REL-ARCH.pkg.tar.zst under /x86_64 adds it to the [internal] database.
+
+set -euEo pipefail
+
+main()
+{
+    local root url
+    root="$(git rev-parse --show-toplevel)"
+    url="${usage_url:-${PACMAN_REPO_URL:-https://repositories.internal/archlinux}}"
+
+    # Only the files of the version the PKGBUILD builds, not older ones lying around
+    local -a pkgs
+    mapfile -t pkgs < <(cd "${root}/packages/arch" && makepkg --packagelist)
+
+    local pkg
+    for pkg in "${pkgs[@]}"; do
+        if [[ ! -f "${pkg}" ]]; then
+            log "Missing ${pkg} — run package-for-arch-linux first."
+            exit 1
+        fi
+    done
+
+    for pkg in "${pkgs[@]}"; do
+        log "Uploading $(basename "${pkg}") to ${url}..."
+        curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --upload-file "${pkg}" \
+            "${url}/x86_64/$(basename "${pkg}")"
+        echo
+    done
+}
+
+log() {
+    echo "[$(date --iso-8601=seconds)] ${*}" >&2
+}
+
+main "${@}"

@@ -44,18 +44,20 @@ sha256sums=(
 )
 
 build() {
-    find "${srcdir}" -mindepth 1 -maxdepth 1 -type "d" -exec sh -c '
-        cd "${0}"
-        python -m build --wheel --no-isolation
-    ' "{}" "${srcdir}" \;
+    local dir
+    for dir in "${srcdir}"/*/; do
+        (cd "${dir}" && python -m build --wheel --no-isolation)
+    done
 }
 
 _install_wheels() {
     local destdir="${1}"
     shift
+    local pattern wheel
     for pattern in "$@"; do
-        find "${srcdir}" -type f -name "${pattern}" \
-            -exec python -m installer --destdir="${destdir}" {} \;
+        wheel=$(find "${srcdir}" -type f -name "${pattern}" -print -quit)
+        [[ -n "${wheel}" ]] || { echo "No wheel matching ${pattern}" >&2; return 1; }
+        python -m installer --destdir="${destdir}" "${wheel}"
     done
 }
 
