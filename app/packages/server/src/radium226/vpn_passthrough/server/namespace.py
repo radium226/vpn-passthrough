@@ -52,7 +52,9 @@ class Namespace:
                 "--user",
                 "--map-user=1000",
                 "--map-group=1000",
-                "--propagation", "private",
+                # Mounts of the host, made after the tunnel starts too, show up in the tunnel, while its own (its
+                # resolv.conf) stay inside
+                "--propagation", "slave",
             "tail", "-f", "/dev/null",
         ]
 
