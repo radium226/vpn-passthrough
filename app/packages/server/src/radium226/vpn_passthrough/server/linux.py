@@ -169,8 +169,10 @@ def make_preexec_fn(username: str, ns_pid: int, cwd: str | None = None, client_p
         if libc.prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0:
             raise OSError(ctypes.get_errno(), "prctl(PR_SET_KEEPCAPS) failed")
 
-        # 4. Drop privileges
+        # 4. Drop privileges: the group too, or the process would keep the one of the daemon, whose socket would let it
+        # run anything as anyone
         os.initgroups(username, gid)
+        os.setgid(gid)
         os.setuid(uid)
 
         # 5. Change working directory as the target user, inside the namespace: before the caps are set, which, all
