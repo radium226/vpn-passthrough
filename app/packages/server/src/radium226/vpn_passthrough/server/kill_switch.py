@@ -8,7 +8,17 @@ from ._run import run
 from .network_interfaces import NetworkInterfaces
 
 
+def _table_name(ni: NetworkInterfaces) -> str:
+    return f"kill_switch_{ni.veth}"
+
+
 class KillSwitch:
+
+    @staticmethod
+    async def clear_stale(ni: NetworkInterfaces) -> None:
+        """Remove the kill switch a former tunnel left on the veth, which a new tunnel on the same veth gets, when it
+        died without deactivating it: it would only let the tunnel reach the VPN server of the former one."""
+        await run(["nft", "destroy", "table", "inet", _table_name(ni)])
 
     @staticmethod
     @asynccontextmanager
@@ -17,12 +27,14 @@ class KillSwitch:
         server_ip: str,
         extra_routes: list[str] | None = None,
     ) -> AsyncIterator[None]:
-        table_name = f"kill_switch_{ni.veth}"
+        table_name = _table_name(ni)
         extra_accept_rules = "".join(
             f'        iifname "{ni.veth}" ip daddr {route} accept\n'
             for route in (extra_routes or [])
         )
+        # Replacing whatever a former tunnel left, rather than adding to it
         ruleset = (
+            f"destroy table inet {table_name}\n"
             f"table inet {table_name} {{\n"
             f"    chain forward {{\n"
             f"        type filter hook forward priority filter; policy accept;\n"

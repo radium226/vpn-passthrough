@@ -194,6 +194,8 @@ class Service():
         try:
             namespace = await stack.enter_async_context(Namespace.create(tunnel_name, base_folder_path=self.namespace_base_folder_path, client_pid=client_pid))
             network_interfaces = await stack.enter_async_context(NetworkInterfaces.add(namespace, cidr=veth_cidr, extra_routes=extra_routes))
+            # Before connecting, as a stale one would only let it reach the VPN server of a former tunnel
+            await KillSwitch.clear_stale(network_interfaces)
             await stack.enter_async_context(Internet.share(tunnel_name, network_interfaces))
             await stack.enter_async_context(VpeerPortForward.setup(namespace, network_interfaces, ports_to_forward_from_vpeer_to_loopback))
 
