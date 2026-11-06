@@ -30,6 +30,9 @@ __all__ = [
 ]
 from ._openvpn import OpenVPN
 
+# The API of the gateway answers in a second: one which doesn't is a tunnel letting nothing through
+_CURL_TIMEOUT_SECONDS = 30
+
 _DEFAULT_CA_CERT_PATH = Path(__file__).parent / "ca.rsa.4096.crt"
 _SERVER_LIST_URL = "https://serverlist.piaservers.net/vpninfo/servers/v6"
 
@@ -97,7 +100,7 @@ class PIABackend:
         # certificate, so we reach it via curl run inside the namespace.
         _, stdout = await run(
             [
-                "curl", "--silent", "--insecure", "-G",
+                "curl", "--silent", "--insecure", "--max-time", str(_CURL_TIMEOUT_SECONDS), "-G",
                 "--data-urlencode", f"token={token}",
                 f"https://{gateway_ip}:19999/getSignature",
             ],
@@ -121,7 +124,7 @@ class PIABackend:
     ) -> None:
         _, stdout = await run(
             [
-                "curl", "--silent", "--insecure", "-G",
+                "curl", "--silent", "--insecure", "--max-time", str(_CURL_TIMEOUT_SECONDS), "-G",
                 "--data-urlencode", f"payload={pas.payload}",
                 "--data-urlencode", f"signature={pas.signature}",
                 f"https://{gateway_ip}:19999/bindPort",

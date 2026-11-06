@@ -90,7 +90,8 @@ class OpenVPN:
             "--ca", str(ca_cert_path),
             "--auth-user-pass", str(credentials_path),
             "--auth-nocache",
-            "--compress",
+            # No --compress: PIA's servers send what OpenVPN 2.7 can't decompress with its stub, and every packet in is
+            # dropped ("Bad compression stub (swap) decompression header byte")
             "--reneg-sec", "0",
             "--resolv-retry", "infinite",
             "--nobind",
