@@ -2,7 +2,7 @@
 pkgbase=vpn-passthrough
 pkgname=('vpn-passthrough-cli' 'vpn-passthrough-pia' 'vpn-passthrough-dummy')
 pkgver=0.1.0
-pkgrel=1
+pkgrel=7
 arch=('x86_64')
 url="https://github.com/radium226/vpn-passthrough"
 license=('MIT')
@@ -74,6 +74,7 @@ package_vpn-passthrough-cli() {
         'iproute2'
         'nftables'
         'curl'
+        'dnsmasq'
     )
     optdepends=('python-capng: ambient capabilities support')
     install=vpn-passthrough.install
