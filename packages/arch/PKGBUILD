@@ -2,7 +2,7 @@
 pkgbase=vpn-passthrough
 pkgname=('vpn-passthrough-cli' 'vpn-passthrough-pia' 'vpn-passthrough-dummy')
 pkgver=0.1.0
-pkgrel=7
+pkgrel=8
 arch=('x86_64')
 url="https://github.com/radium226/vpn-passthrough"
 license=('MIT')
