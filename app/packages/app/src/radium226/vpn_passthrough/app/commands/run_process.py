@@ -27,7 +27,7 @@ from radium226.vpn_passthrough.app.commands._helpers import pass_config_folder, 
 @click.option("--configure-with", "configure_with", default=None, type=click.Path(), help="Script to run after port rebind and before process restart; receives tunnel context as JSON on stdin.")
 @click.option("--kill-switch", "kill_switch", type=click.Choice(["yes", "no"]), default=None, help="Block all traffic that bypasses the VPN tunnel (default: yes). Only applies when creating a temporary tunnel.")
 @click.option("--drop-caps/--no-drop-caps", "drop_caps", default=True, help="Run without ambient capabilities (default: yes). Required for tools that create their own user namespaces (e.g. bwrap, podman).")
-@click.option("--user", "username", default=None, help="Run the process as this user (default: the one running this command). Whoever reaches the daemon may name any user.")
+@click.option("--user", "username", default=None, help="Run the process as this user, with its groups (default: as this command runs, without the group of the daemon). Whoever reaches the daemon may name any user.")
 @click.argument("command", nargs=-1, required=True)
 @pass_config_folder
 def run_process(config_folder_path: Path | None, kill_with: int | None, tunnel_name: str | None, region_id: str | None, backend_name: str | None, configure_with: str | None, kill_switch: str | None, drop_caps: bool, username: str | None, command: tuple[str, ...]) -> None:

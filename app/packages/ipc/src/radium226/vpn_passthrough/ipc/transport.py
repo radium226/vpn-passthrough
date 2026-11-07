@@ -2,6 +2,8 @@ import array
 import asyncio
 import os
 import socket
+import struct
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator, Protocol, runtime_checkable
@@ -9,6 +11,20 @@ from typing import AsyncIterator, Protocol, runtime_checkable
 from loguru import logger
 
 MAX_BUFFER_SIZE = 16 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class PeerCredentials:
+    """Who connected, from SO_PEERCRED: the kernel tells it, so unlike what a request says, it can be trusted."""
+
+    pid: int
+    uid: int
+    gid: int
+
+
+# Of the connection whose request is being handled: the server sets it in the task of each connection, which the
+# tasks of its requests inherit
+current_peer_credentials: ContextVar[PeerCredentials | None] = ContextVar("current_peer_credentials", default=None)
 
 
 @dataclass
@@ -49,6 +65,15 @@ class Connection:
     @classmethod
     def from_socket(cls, sock: socket.socket, framing: Framing = NullCharFraming()) -> "Connection":
         return cls(sock, framing)
+
+    @property
+    def peer_credentials(self) -> PeerCredentials | None:
+        """Of the process which connected, as they were then; None if the socket isn't a Unix one."""
+        if self._socket.family != socket.AF_UNIX:
+            return None
+        data = self._socket.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+        pid, uid, gid = struct.unpack("3i", data)
+        return PeerCredentials(pid=pid, uid=uid, gid=gid)
 
     async def _wait_readable(self, loop: asyncio.AbstractEventLoop) -> None:
         fd = self._socket.fileno()

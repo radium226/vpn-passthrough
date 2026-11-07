@@ -6,7 +6,15 @@ from typing import Any, AsyncIterator
 from loguru import logger
 
 from .protocol import Codec, Request, RequestHandler, Response, validate_event, validate_response
-from .transport import Connection, Frame, Framing, NullCharFraming, accept_connections, is_socket_activated
+from .transport import (
+    Connection,
+    Frame,
+    Framing,
+    NullCharFraming,
+    accept_connections,
+    current_peer_credentials,
+    is_socket_activated,
+)
 
 
 class Server[RequestT: Request, EventT, ResponseT: Response]():
@@ -25,6 +33,7 @@ class Server[RequestT: Request, EventT, ResponseT: Response]():
 
     async def _handle_connection(self, connection: Connection) -> None:
         self._connections.append(connection)
+        current_peer_credentials.set(connection.peer_credentials)
         logger.info("Client connected (total connections: {})", len(self._connections))
 
         try:

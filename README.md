@@ -195,6 +195,31 @@ vpn-passthrough run-process --region-id us-texas curl https://ifconfig.me
 
 If `--in-tunnel` is omitted, a temporary tunnel is created for the duration of the command.
 
+The process is run as its client is, only in the network of the tunnel: the daemon reads the client (whom it knows from `SO_PEERCRED`) and copies to the process
+
+* its uid, gid and supplementary groups, without the group of the daemon (or those of the user `--user` names);
+* its umask, rlimits, capability bounding set and `no_new_privs`;
+* its mount namespace, with the `resolv.conf` and `nsswitch.conf` of the tunnel on top;
+* its cgroup, and its seccomp filters, installed last.
+
+So a systemd unit hardens the process too, not only the client: a drop-in which replaces `ExecStart=` moves it into a tunnel.
+
+```ini
+# /etc/systemd/system/airdcpp.service.d/vpn-passthrough.conf
+[Unit]
+Requires=vpn-passthrough@piracy.service
+After=vpn-passthrough@piracy.service
+PartOf=vpn-passthrough@piracy.service
+
+[Service]
+# To reach the socket, which the process doesn't keep
+SupplementaryGroups=vpn-passthrough
+ExecStart=
+ExecStart=/usr/bin/vpn-passthrough run-process --in-tunnel piracy -- /usr/bin/airdcppd
+```
+
+If the daemon can't copy something (the seccomp filters of a client it can't trace, say), it doesn't run the process.
+
 ---
 
 ### `debug-tunnel [OPTIONS]`
@@ -260,5 +285,5 @@ vpn-passthrough show-config --client-only
 ## Security Considerations
 
 - The daemon must run as root (network namespace and nftables manipulation require `CAP_NET_ADMIN` and `CAP_SYS_ADMIN`).
-- The Unix socket is owned by the `vpn-passthrough` group (mode `0660`). Add trusted users to this group to grant access.
+- The Unix socket is owned by the `vpn-passthrough` group (mode `0660`). Add trusted users to this group to grant access: they may run anything as anyone, root included. The processes of the tunnels don't keep this group.
 - DNS leak prevention is enforced via nftables rules inside each namespace that drop outgoing DNS traffic on the veth interface, ensuring all DNS queries route through the VPN tunnel.

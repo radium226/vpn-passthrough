@@ -8,6 +8,7 @@ from pydantic import BaseModel, Discriminator, TypeAdapter
 
 from radium226.vpn_passthrough.ipc.ipc import open_client, open_server
 from radium226.vpn_passthrough.ipc.protocol import Codec, Emit, Request, RequestFailedError, RequestHandler, ResponseHandler
+from radium226.vpn_passthrough.ipc.transport import PeerCredentials, current_peer_credentials
 
 
 # -- Test messages --
@@ -247,3 +248,19 @@ async def test_handler_exception_returns_error_response_and_keeps_connection_ope
             )
 
             assert result_value == "HELLO"
+
+
+@pytest.mark.asyncio
+async def test_handlers_know_who_connected(socket_path: Path):
+    """The kernel tells the server who connected, which, unlike what a request says, a client can't make up."""
+    seen: list[PeerCredentials | None] = []
+
+    async def handle_ping(request: Ping, fds: list[int], emit: Emit[Never]) -> tuple[Pong, list[int]]:
+        seen.append(current_peer_credentials.get())
+        return Pong(request_id=request.id, value=request.value), []
+
+    async with open_server(socket_path, CODEC, handlers=[RequestHandler(request_type=Ping, on_request=handle_ping)]):
+        async with open_client(socket_path, CODEC) as client:
+            await client.request(Ping(id="1", value="hello"), handler=ResponseHandler())
+
+    assert seen == [PeerCredentials(pid=os.getpid(), uid=os.getuid(), gid=os.getgid())]

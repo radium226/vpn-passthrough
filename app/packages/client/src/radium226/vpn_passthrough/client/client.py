@@ -1,5 +1,4 @@
 import asyncio
-import getpass
 import os
 import random
 import uuid
@@ -115,7 +114,7 @@ class Client:
                 kill_with=kill_with,
                 tunnel_name=tunnel_name,
                 cwd=cwd,
-                username=username or getpass.getuser(),
+                username=username,
                 gid=gid,
                 ambient_capabilities=ambient_capabilities,
                 client_pid=os.getpid(),

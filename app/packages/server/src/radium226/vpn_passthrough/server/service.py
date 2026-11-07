@@ -14,6 +14,7 @@ from jinja2 import Template, TemplateError
 from loguru import logger
 
 from radium226.vpn_passthrough.ipc.protocol import Emit
+from radium226.vpn_passthrough.ipc.transport import current_peer_credentials
 
 from radium226.vpn_passthrough.messages import (
     BackendInfo,
@@ -52,6 +53,7 @@ from .internet import Internet
 from .namespace import Namespace
 from .network_interfaces import NetworkInterfaces
 from .vpeer_port_forward import VpeerPortForward
+from .client_process import ClientProcessError, read_client_process
 from .linux import make_preexec_fn
 
 _MIN_RESTART_INTERVAL = 1.0  # seconds — prevent tight restart loops
@@ -276,8 +278,13 @@ class Service():
 
         if request.tunnel_name is None:
             raise ValueError("RunProcess requires tunnel_name")
-        if request.username is None:
-            raise ValueError("RunProcess requires username")
+
+        # The client is who the kernel says connected, not who the request says: the process takes its namespaces,
+        # its cgroup and the rest
+        peer_credentials = current_peer_credentials.get()
+        if peer_credentials is None:
+            raise ValueError("RunProcess requires a client on the Unix socket")
+        client_pid = peer_credentials.pid
 
         tunnel_name = request.tunnel_name
         if tunnel_name in self._shutting_down:
@@ -295,18 +302,31 @@ class Service():
             async def _discard_emit(event: Any, fds: list[int]) -> None:
                 pass
 
-            await self._setup_tunnel(tunnel_name, None, [], _discard_emit, client_pid=request.client_pid)
+            await self._setup_tunnel(tunnel_name, None, [], _discard_emit, client_pid=client_pid)
 
         namespace = self.namespaces[tunnel_name]
 
         ambient_caps = frozenset(request.ambient_capabilities) if request.ambient_capabilities is not None else None
-        preexec_fn, close_parent_fds = make_preexec_fn(
-            request.username,
-            namespace.pid,
-            cwd=request.cwd,
-            client_pid=request.client_pid,
-            ambient_capabilities=ambient_caps,
-        )
+        try:
+            # In a thread: ptrace ties the client to the one which attaches, while the loop goes on
+            client = await asyncio.to_thread(read_client_process, client_pid)
+            preexec_fn, close_parent_fds = make_preexec_fn(
+                tunnel_pid=namespace.pid,
+                tunnel_folder_path=namespace.directory,
+                client=client,
+                # Of the socket, which the process must not keep
+                daemon_gid=os.getegid(),
+                username=request.username,
+                cwd=request.cwd,
+                ambient_capabilities=ambient_caps,
+            )
+        except (ClientProcessError, OSError, KeyError):
+            for fd in (stdin_fd, stdout_fd, stderr_fd):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            raise
 
         first = True
         restart_count = 0
@@ -403,6 +423,15 @@ class Service():
                     except OSError as e:
                         logger.warning("Failed to close fd {}: {}", fd, e)
                 return CommandNotFound(request_id=request.id, command=command), []
+            except BaseException:
+                # Or the client would wait for the end of its output forever
+                close_parent_fds()
+                for fd in (stdin_fd, stdout_fd, stderr_fd):
+                    try:
+                        os.close(fd)
+                    except OSError as e:
+                        logger.warning("Failed to close fd {}: {}", fd, e)
+                raise
 
             self.processes[tunnel_name][process.pid] = ProcessInfo(pid=process.pid, command=command, args=args)
             self._active_processes.setdefault(tunnel_name, {})[process.pid] = process
